@@ -27,11 +27,27 @@ so point the forward at a node that runs the pod.
 | `airweave-backend`     | **30801**           | 8001                   |
 | `airweave-frontend`    | **30880**           | 8080                   |
 | `airweave-connect`     | **30882**           | 8082                   |
-| `airweave-temporal-ui` | **30888**           | 8080                   |
+
+`airweave-temporal-ui` has no authentication, so it is deliberately **ClusterIP
+only** (no NodePort). Reach it through a tunnel instead:
+`microk8s kubectl port-forward -n airweave svc/airweave-temporal-ui 8088:8088`.
 
 For example, a Secure Link for the API forwards public 443 to destination
 `30801`. Forwarding to `8001` would bypass the Service, unless something else
 such as `kubectl proxy` (also 8001 by default) is listening there.
+
+## Security
+
+A NodePort listens on **every node interface**, not only the path a Secure Link
+uses. Before forwarding traffic:
+
+- Keep 30000–32767 **closed** in the cloud firewall (Brev "Cloud Firewall
+  Ports"). Only the Secure Link / TCP forward should reach the NodePorts; do not
+  open them to "Anywhere".
+- Run the backend with authentication on (`AUTH_ENABLED=true`). A NodePort
+  bypasses any control that exists only at the Secure Link.
+- Check that each Service has ready endpoints on the node you forward to:
+  `microk8s kubectl get endpointslices -n airweave`.
 
 ## New Services
 
@@ -54,15 +70,22 @@ kubectl patch service <service-name> \
   --patch '{"spec":{"externalTrafficPolicy":"Local"}}'
 ```
 
-Or patch every NodePort Service in a namespace and print the NodePorts to use:
+Or use the script, which patches, reads each change back and prints the
+NodePorts to use:
 
 ```bash
-deploy/microk8s/patch-external-traffic-policy.sh -n airweave            # all NodePorts
-deploy/microk8s/patch-external-traffic-policy.sh -n airweave airweave-backend
+deploy/microk8s/patch-external-traffic-policy.sh -n airweave                   # Airweave-labelled NodePorts
+deploy/microk8s/patch-external-traffic-policy.sh -n airweave airweave-backend  # named Services only
+deploy/microk8s/patch-external-traffic-policy.sh -n airweave -A                # every NodePort in the namespace
 ```
 
-The script is idempotent and falls back to `microk8s kubectl` when `kubectl`
-is not on `PATH`.
+By default it only touches Services labelled
+`app.kubernetes.io/part-of=airweave`, so other workloads in a shared namespace
+are left alone. It is idempotent and falls back to `microk8s kubectl` when
+`kubectl` is not on `PATH`. If any Service fails to patch or does not read back
+as `Local`, it names them and exits non-zero. Some Services may already have
+changed at that point, so fix the cause and re-run it (safe to repeat) before
+forwarding traffic.
 
 ## Verify
 

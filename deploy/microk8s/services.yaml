@@ -66,6 +66,9 @@ spec:
       targetPort: 8082
       nodePort: 30882
 ---
+# Temporal UI has no authentication of its own, so it is ClusterIP only and
+# never gets a NodePort. Reach it with:
+#   microk8s kubectl port-forward -n airweave svc/airweave-temporal-ui 8088:8088
 apiVersion: v1
 kind: Service
 metadata:
@@ -74,8 +77,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: airweave
 spec:
-  type: NodePort
-  externalTrafficPolicy: Local
+  type: ClusterIP
   selector:
     app: airweave-temporal-ui
   ports:
@@ -83,4 +85,3 @@ spec:
       protocol: TCP
       port: 8088
       targetPort: 8080
-      nodePort: 30888
