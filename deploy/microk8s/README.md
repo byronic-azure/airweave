@@ -68,6 +68,8 @@ is not on `PATH`.
 
 ```bash
 python3 deploy/microk8s/check_policy.py     # manifests: Local, valid and unique nodePorts
-kubectl get svc -n airweave \
+microk8s kubectl get svc -n airweave \
   -o custom-columns=NAME:.metadata.name,POLICY:.spec.externalTrafficPolicy,NODEPORT:.spec.ports[*].nodePort
 ```
+
+Use plain `kubectl` instead of `microk8s kubectl` if it is on your `PATH`.

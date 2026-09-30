@@ -24,7 +24,11 @@ def check_service(doc: dict, source: str) -> list[str]:
         errors.append(f"{source}: Service {name} must set externalTrafficPolicy: Local")
     for port in spec.get("ports") or []:
         node_port = port.get("nodePort")
-        if node_port is not None and node_port not in NODE_PORT_RANGE:
+        if node_port is None:
+            continue
+        if not isinstance(node_port, int) or isinstance(node_port, bool):
+            errors.append(f"{source}: Service {name} nodePort {node_port!r} must be an integer")
+        elif node_port not in NODE_PORT_RANGE:
             errors.append(f"{source}: Service {name} nodePort {node_port} outside 30000-32767")
     return errors
 

@@ -31,8 +31,14 @@ fi
 if [ "$#" -gt 0 ]; then
   services=("$@")
 else
-  mapfile -t services < <("${KUBECTL[@]}" get services -n "$NAMESPACE" \
+  # Plain assignment so `set -e` aborts if discovery fails (missing namespace,
+  # RBAC, unreachable cluster) instead of reporting "no Services found".
+  discovered=$("${KUBECTL[@]}" get services -n "$NAMESPACE" \
     -o jsonpath='{range .items[?(@.spec.type=="NodePort")]}{.metadata.name}{"\n"}{end}')
+  services=()
+  if [ -n "$discovered" ]; then
+    mapfile -t services <<< "$discovered"
+  fi
 fi
 
 if [ "${#services[@]}" -eq 0 ]; then
