@@ -1,0 +1,87 @@
+# Airweave NodePort Services for MicroK8s.
+#
+# Every NodePort Service here sets `externalTrafficPolicy: Local`. Brev Secure
+# Links and TCP/UDP port access forward to the node, and must target the
+# `nodePort` below — never the pod/container `targetPort`.
+#
+#   Secure Link / TCP port  ->  node:<nodePort>  ->  pod:<targetPort>
+#
+# Selectors assume Deployments labelled `app: <name>`; adjust to match yours.
+# Validate with: python3 deploy/microk8s/check_policy.py
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airweave-backend
+  namespace: airweave
+  labels:
+    app.kubernetes.io/part-of: airweave
+spec:
+  type: NodePort
+  externalTrafficPolicy: Local
+  selector:
+    app: airweave-backend
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8001
+      targetPort: 8001
+      nodePort: 30801
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airweave-frontend
+  namespace: airweave
+  labels:
+    app.kubernetes.io/part-of: airweave
+spec:
+  type: NodePort
+  externalTrafficPolicy: Local
+  selector:
+    app: airweave-frontend
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+      nodePort: 30880
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airweave-connect
+  namespace: airweave
+  labels:
+    app.kubernetes.io/part-of: airweave
+spec:
+  type: NodePort
+  externalTrafficPolicy: Local
+  selector:
+    app: airweave-connect
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8082
+      targetPort: 8082
+      nodePort: 30882
+---
+# Temporal UI has no authentication of its own, so it is ClusterIP only and
+# never gets a NodePort. Reach it with:
+#   microk8s kubectl port-forward -n airweave svc/airweave-temporal-ui 8088:8088
+apiVersion: v1
+kind: Service
+metadata:
+  name: airweave-temporal-ui
+  namespace: airweave
+  labels:
+    app.kubernetes.io/part-of: airweave
+spec:
+  type: ClusterIP
+  selector:
+    app: airweave-temporal-ui
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8088
+      targetPort: 8080
