@@ -46,7 +46,12 @@ const SQLI_SIGNATURES: readonly RegExp[] = [
 ];
 
 const SHELL_SIGNATURES: readonly RegExp[] = [
-  /[;&|`]\s*(cat|ls|id|whoami|uname|wget|curl|nc|ncat|bash|sh|zsh|python\d?|perl|php|powershell|cmd(\.exe)?)\b/,
+  // Chained command after a shell operator. `&` is deliberately not an operator:
+  // in a query string it separates parameters (`&id=5`, `&cat=books`). After `|`
+  // the command must be followed by whitespace or another operator, so a value
+  // like `fields=name|id` is not a signal; after `;` or a backtick end-of-string
+  // also counts (`?x=;id` is a classic probe).
+  /(?:[;`]\s*(?:cat|ls|id|whoami|uname|wget|curl|nc|ncat|bash|sh|zsh|python\d?|perl|php|powershell|cmd(?:\.exe)?)(?=[\s;|`]|$))|(?:\|\s*(?:cat|ls|id|whoami|uname|wget|curl|nc|ncat|bash|sh|zsh|python\d?|perl|php|powershell|cmd(?:\.exe)?)(?=[\s;|`]))/,
   /\$\([^)]*\)/, // $(...)
   /`[^`]+`/, // backticks
   /\/etc\/(passwd|shadow|hosts|group)\b/,

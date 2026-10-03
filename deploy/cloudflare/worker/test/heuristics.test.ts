@@ -40,6 +40,13 @@ describe("heuristics (unit)", () => {
     expect(inspect("https://gw.test/a/%252e%252e/b").hard).toEqual(["path_traversal"]);
     expect(inspect("https://gw.test/a%00.json").hard).toEqual(["null_byte"]);
     expect(inspect("https://gw.test/a/..../b").soft).toEqual(["dot_segment_variant"]);
+    // query separators and list delimiters are not shell operators
+    for (const benign of ["/items?page=1&id=5", "/items?fields=name|id", "/items?cat=books&nc=2", "/items?x=1&sh=on"]) {
+      expect(inspect(`https://gw.test${benign}`).soft).toEqual([]);
+    }
+    for (const probe of ["/items?x=;id", "/items?x=1;cat%20/etc/passwd", "/items?x=|whoami;", "/items?x=`id`"]) {
+      expect(inspect(`https://gw.test${probe}`).soft).toContain("shell_signature");
+    }
     expect(inspect(`https://gw.test/items?q=${"a".repeat(5000)}`).soft).toEqual(["long_url"]);
     expect(inspect("https://gw.test/collections/my-collection/search?query=hello%20world")).toEqual({
       hard: [],

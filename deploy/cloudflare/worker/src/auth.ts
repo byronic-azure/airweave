@@ -31,6 +31,8 @@ export interface Principal {
   id: string;
   /** Stable, secret-free key for rate limiting and the denylist. */
   key: string;
+  /** True for a human Access identity (email claim); false for service tokens and non-JWT principals. */
+  user?: boolean;
 }
 
 export type AuthResult = { ok: true; principal: Principal } | { ok: false; response: Response };
@@ -110,7 +112,8 @@ async function authenticateAccessJwt(request: Request, env: Env, requestId: stri
         response: jsonError(403, "invalid_access_token", "Token carries no identity claim", requestId),
       };
     }
-    return { ok: true, principal: { kind: "access-jwt", id, key: `jwt:${id}` } };
+    const user = typeof payload["email"] === "string" && payload["email"] !== "";
+    return { ok: true, principal: { kind: "access-jwt", id, key: `jwt:${id}`, user } };
   } catch {
     return {
       ok: false,

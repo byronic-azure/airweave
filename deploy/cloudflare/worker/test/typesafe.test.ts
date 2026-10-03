@@ -263,6 +263,28 @@ describe("TypeSafe verify-and-escalate", () => {
       expect(await testEnv.DENYLIST.get(await principalKey())).not.toBeNull();
     });
 
+    it("still denylists an Access service token (no email claim), which a browser cannot be made to send", async () => {
+      const issuer = await makeAccessIssuer();
+      serveJwks(stub, issuer);
+      serveTypeSafe(() => Response.json(typeSafeAnswer(0.99)));
+      const env = makeEnv({
+        ...baseEnv(),
+        DENYLIST: testEnv.DENYLIST,
+        TYPESAFE_AUTOBLOCK: "1",
+        AUTH_MODE: "access-jwt",
+        TEAM_DOMAIN,
+        POLICY_AUD,
+        GATEWAY_API_KEY: undefined,
+      });
+      const token = await issuer.sign({ common_name: "ci-runner.access" });
+      const res = await run(
+        gatewayRequest(FLAGGED_PATH, { apiKey: null, headers: { "Cf-Access-Jwt-Assertion": token } }),
+        env,
+      );
+      expect(res.status).toBe(200);
+      expect(await testEnv.DENYLIST.get("jwt:ci-runner.access")).not.toBeNull();
+    });
+
     it("records applied: false when the DENYLIST write fails", async () => {
       serveTypeSafe(() => Response.json(typeSafeAnswer(0.99)));
       const puts: string[] = [];

@@ -8,7 +8,7 @@
  *   hard heuristics         -> 400 + evidence (traversal, null byte, bad method)
  *   authenticate            -> 401/403/500 per AUTH_MODE (+ evidence when soft-flagged)
  *   denylist (optional KV)  -> 403 (+ evidence when soft-flagged)
- *   rate limit (optional)   -> 429 + evidence
+ *   rate limit (optional)   -> 429 + evidence (bounded by an `esc:` budget key)
  *   GET /evidence/verify    -> chain verification (auth required)
  *   proxy to ORIGIN_URL     -> streamed response; soft signals -> evidence
  *
@@ -60,7 +60,9 @@ async function escalate(request: Request, env: Env, rc: RequestContext, e: Escal
   // judgement still land for human review. Hard blocks (anonymous, keyed by IP)
   // and api-key principals, whose credential a browser cannot be made to attach,
   // stay eligible.
-  if (e.principal.kind === "access-jwt") autoblock.apply = false;
+  // Service tokens (common_name-only JWTs) are not sent by browsers, so they stay
+  // eligible like api-key principals.
+  if (e.principal.kind === "access-jwt" && e.principal.user) autoblock.apply = false;
   // The KV write goes first so the hash-chained row records what actually
   // happened to the denylist (`applied`), not only what was decided (`requested`).
   const applied = await applyAutoblock(env, e.principal.key, autoblock, rc.requestId);
@@ -175,15 +177,27 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext, rc: Req
 
   const limit = await checkRateLimit(env.RATE_LIMITER, principal.key);
   if (limit === "limited") {
-    ctx.waitUntil(
-      escalate(request, env, rc, {
-        principal,
-        signals: ["rate_limit_exceeded", ...inspection.soft],
-        verdict: "rate_limited",
-        reason: "rate_limit_exceeded",
-        statusReturned: 429,
-      }),
-    );
+    // The principal's own bucket is exhausted by definition here, so the
+    // escalation (TypeSafe call + D1 append) runs under a separate `esc:` key on
+    // the same limiter: a flood of 429s records at most one bucket's worth of
+    // evidence per period instead of one row and one judgement per request.
+    if ((await checkRateLimit(env.RATE_LIMITER, `esc:${principal.key}`)) === "limited") {
+      logEvent("warn", "escalation_suppressed", {
+        request_id: requestId,
+        principal_key: principal.key,
+        why: "escalation_budget",
+      });
+    } else {
+      ctx.waitUntil(
+        escalate(request, env, rc, {
+          principal,
+          signals: ["rate_limit_exceeded", ...inspection.soft],
+          verdict: "rate_limited",
+          reason: "rate_limit_exceeded",
+          statusReturned: 429,
+        }),
+      );
+    }
     return rateLimitedResponse(env, requestId);
   }
 

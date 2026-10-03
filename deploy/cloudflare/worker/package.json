@@ -6,7 +6,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "predev": "wrangler d1 migrations apply airweave-edge-evidence --local",
+    "predev": "wrangler d1 migrations apply airweave-edge-evidence --local || echo 'EVIDENCE_DB not bound: skipping local D1 migrations (evidence logs to the console)'",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "vitest run",

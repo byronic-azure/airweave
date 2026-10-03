@@ -170,8 +170,9 @@ http://localhost:8787/healthz), `npm test`, `npm run typecheck`, `npm run deploy
 Tests run inside workerd through `@cloudflare/vitest-pool-workers` with a local D1
 (migrations applied from `migrations/`) and KV; outbound `fetch` is stubbed, so no
 network is needed.
-`.npmrc` pins legacy peer resolution because npm 10 fails to resolve vitest 4's
-optional peers otherwise; the lockfile is reproducible with `npm ci`.
+`.npmrc` pins legacy peer resolution because wrangler 4 declares an optional peer
+on `@cloudflare/workers-types` v5 while this package pins v4; the lockfile is
+reproducible with `npm ci`.
 
 ## Notes and limits
 

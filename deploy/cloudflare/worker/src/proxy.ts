@@ -78,7 +78,8 @@ export function parseOriginUrl(env: Env): URL | null {
 }
 
 function joinPath(base: string, path: string): string {
-  const trimmedBase = base.replace(/\/+$/, "");
+  let trimmedBase = base;
+  while (trimmedBase.endsWith("/")) trimmedBase = trimmedBase.slice(0, -1);
   return trimmedBase + (path.startsWith("/") ? path : `/${path}`);
 }
 

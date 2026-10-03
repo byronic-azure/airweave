@@ -170,7 +170,7 @@ rolls the pod.
    `airweave-origin`, application domain `airweave-origin.<zone>`.
 3. One policy only: action **Service Auth**, include rule **Service Token** = the
    token from step 1. No Allow policy for users: nobody logs in to the origin.
-4. Zero Trust → Settings → Access → **Strict service token authentication**: turn it
+4. Zero Trust → Access controls → Access settings → Manage service tokens → **Strict service token authentication**: turn it
    on. Organisations created on or after 2026-10-05 have it on already; older ones
    have it off, and in that mode Access answers every valid service-token request
    with a `Set-Cookie: CF_Authorization=<JWT>` session cookie for the origin
@@ -347,6 +347,7 @@ manifests and the scripts. Required unless marked optional.
 | `KUBE_CONTEXT`       | `-c` | up.sh, down.sh, check.sh    | kube context, default `docker-desktop`               |
 | `GATEWAY_URL`        | `-u` | check.sh                    | `https://api.<zone>`; `/healthz` must be 200 `ok:true` |
 | `ORIGIN_URL`         | `-o` | check.sh                    | `https://airweave-origin.<zone>`; Access must refuse (same value as the Worker var) |
+| `ORIGIN_SERVICE_TOKEN_ID`, `ORIGIN_SERVICE_TOKEN_SECRET` | – | check.sh | origin cookie check: the Worker's own token is sent to the tunnel hostname and the answer must carry no `Set-Cookie: CF_Authorization` (requires strict service token authentication, step 4) |
 | `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | – | check.sh | access-jwt mode: service token sent as `CF-Access-Client-Id`/`-Secret` on the `/healthz` request, because Access on `api.<zone>` answers before the Worker; unnecessary with a `/healthz` Bypass policy or in api-key mode |
 | `AIRWEAVE_TOOLS_BIN` | `-b` | validate.sh                 | directory with kubectl / kustomize / kubeconform / cloudflared / shellcheck |
 

@@ -13,7 +13,7 @@
 #             With ORIGIN_SERVICE_TOKEN_ID / ORIGIN_SERVICE_TOKEN_SECRET exported (the
 #             Worker's origin token) a second request carries the token and must be
 #             let through WITHOUT a Set-Cookie: CF_Authorization in the answer, which
-#             requires Zero Trust > Settings > Access > "Strict service token
+#             requires Zero Trust > Access controls > Access settings > Manage service tokens > "Strict service token
 #             authentication" (README, step 4); a cookie there is a bearer credential
 #             for the origin hostname
 #   backend   optional (-i): a throw-away curl pod reaches the backend through the
@@ -184,7 +184,7 @@ if [ -n "$ORIGIN" ]; then
       000) fail cookie "$url unreachable with the origin service token: $(cat "$WORK/curl.err")" ;;
       *) if grep -qi '^set-cookie:[[:space:]]*CF_Authorization=' "$WORK/origin-headers.out"; then
            fail cookie "$url -> $code with the token but Access returned a CF_Authorization cookie." \
-             "Turn on Zero Trust > Settings > Access > Strict service token authentication (README, step 4)."
+             "Turn on Zero Trust > Access controls > Access settings > Manage service tokens > Strict service token authentication (README, step 4)."
          else
            pass cookie "$url -> $code with the origin service token and no CF_Authorization cookie"
          fi ;;

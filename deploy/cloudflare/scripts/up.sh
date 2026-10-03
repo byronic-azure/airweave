@@ -168,8 +168,8 @@ fi
 cat <<EOT
   2. Lock the hostname to the Worker. Zero Trust > Access > Applications > Add application
      (self-hosted) for airweave-origin.<zone> with one policy of action "Service Auth" that
-     allows a Service Token created under Access > Service Auth > Service Tokens.
-     Then Zero Trust > Settings > Access > turn on "Strict service token authentication"
+     allows a Service Token created under Access controls > Service credentials > Service Tokens.
+     Then Zero Trust > Access controls > Access settings > Manage service tokens > turn on "Strict service token authentication"
      so Access never answers the Worker's token with a CF_Authorization cookie.
   3. Hand that token to the Worker so only it can pass the Access check:
        cd deploy/cloudflare/worker

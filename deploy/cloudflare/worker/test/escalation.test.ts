@@ -66,6 +66,30 @@ describe("escalation budget and pre-auth evidence", () => {
   const baseEnv = (overrides = {}) =>
     makeEnv({ EVIDENCE_DB: testEnv.EVIDENCE_DB, DENYLIST: testEnv.DENYLIST, TYPESAFE_API_KEY: "ts-key", ...overrides });
 
+  describe("rate-limited requests", () => {
+    const keyed = (limitedKeys: (key: string) => boolean): RateLimitBinding & { keys: string[] } => {
+      const keys: string[] = [];
+      return { keys, async limit({ key }) { keys.push(key); return { success: !limitedKeys(key) }; } };
+    };
+
+    it("are judged and recorded under a separate esc: budget key", async () => {
+      const limiter = keyed((key) => !key.startsWith("esc:")); // principal over limit, budget open
+      const res = await run(gatewayRequest("/collections"), baseEnv({ RATE_LIMITER: limiter }));
+      expect(res.status).toBe(429);
+      expect(limiter.keys.some((k) => k.startsWith("esc:apikey:"))).toBe(true);
+      expect(await evidenceRows()).toMatchObject([{ verdict: "rate_limited" }]);
+      expect(typesafeCalls).toBe(1);
+    });
+
+    it("stop being judged and recorded once the esc: budget is exhausted", async () => {
+      const res = await run(gatewayRequest("/collections"), baseEnv({ RATE_LIMITER: fakeLimiter(false) }));
+      expect(res.status).toBe(429);
+      expect(await evidenceRows()).toEqual([]);
+      expect(typesafeCalls).toBe(0);
+      expect(JSON.parse(suppressedLogs()[0] as string)).toMatchObject({ why: "escalation_budget" });
+    });
+  });
+
   describe("hard-blocked requests", () => {
     it("are escalated within the anonymous budget, keyed by client IP", async () => {
       const limiter = fakeLimiter(true);
