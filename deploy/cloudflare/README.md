@@ -170,9 +170,18 @@ rolls the pod.
    `airweave-origin`, application domain `airweave-origin.<zone>`.
 3. One policy only: action **Service Auth**, include rule **Service Token** = the
    token from step 1. No Allow policy for users: nobody logs in to the origin.
-4. Check it: `curl -sI https://airweave-origin.<zone>/health/ready` must answer
+4. Zero Trust → Settings → Access → **Strict service token authentication**: turn it
+   on. Organisations created on or after 2026-10-05 have it on already; older ones
+   have it off, and in that mode Access answers every valid service-token request
+   with a `Set-Cookie: CF_Authorization=<JWT>` session cookie for the origin
+   hostname and honours that cookie on later requests. The Worker drops any `CF_*`
+   cookie in both directions (origin → client and client → origin), but the
+   setting is what makes such a cookie worthless if it ever leaked by another path.
+5. Check it: `curl -sI https://airweave-origin.<zone>/health/ready` must answer
    302, 401 or 403 (Access refusing). A 200 means the origin bypasses the Worker.
-   `check.sh -o https://airweave-origin.<zone>` performs exactly this test.
+   `check.sh -o https://airweave-origin.<zone>` performs exactly this test, and
+   with `ORIGIN_SERVICE_TOKEN_ID`/`ORIGIN_SERVICE_TOKEN_SECRET` exported it also
+   sends the token and fails if a `CF_Authorization` cookie comes back.
 
 ### 5. Decide who may call the gateway
 
@@ -370,8 +379,13 @@ edge rejects every request that lacks a valid `CF-Access-Client-Id`/`-Secret` pa
 before it reaches `cloudflared`, and the only holder of that pair is the Worker (two
 `wrangler secret`s). The Worker also strips every incoming `cf-access-*` header, so a
 client cannot smuggle its own token or a forged assertion through the gateway.
+The Worker also drops every `CF_*` cookie in both directions: the `CF_Authorization`
+session cookie Access mints for the origin hostname (without strict service token
+authentication, step 4) would otherwise be relayed to the gateway client as a
+bearer credential for the origin, and a client-supplied one never reaches Access.
 `check.sh -o` verifies the lock from outside: the origin must answer 302/401/403 to
-an unauthenticated request; a 200 there is a misconfiguration. Rotate the token by
+an unauthenticated request (a 200 there is a misconfiguration) and, given the origin
+token, must answer without a `CF_Authorization` cookie. Rotate the token by
 creating a new one, adding it to the policy, `wrangler secret put` both values,
 then deleting the old token.
 
@@ -464,6 +478,14 @@ unauthenticated requests are keyed by IP, so such an entry denies proxied traffi
 only when the IP *is* the principal (`AUTH_MODE=off`); what it always does is stop
 further rejected requests from that IP being escalated (no more TypeSafe calls or
 evidence rows until the TTL expires), the budget described under the evidence log.
+`jwt:` principals are **never** autoblocked, only labelled: the request that earns
+the judgement can be planted by a third party, because a cross-site GET (a link, an
+`<img>`) carries the victim's `CF_Authorization` cookie for `api.<zone>` and Access
+attaches their identity, and a page of such loads trips the rate limit too. The
+evidence row and judgement still land for human review; an operator who wants a
+user blocked writes the `jwt:` key by hand (below). `apikey:` principals stay
+eligible, since a browser cannot be made to attach the `X-Airweave-Gateway-Key`
+header cross-site.
 `judgement_json.autoblock` records `requested` (the gate fired) and `applied` (the
 KV write succeeded) separately, because the KV write runs before the row is sealed
 and a failed write must not be recorded as a block. Inspect or

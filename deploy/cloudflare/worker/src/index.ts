@@ -53,11 +53,14 @@ async function escalate(request: Request, env: Env, rc: RequestContext, e: Escal
     ? await judgeWithTypeSafe(env, buildTypeSafeState(request, rc.url, e.signals, e.principal.kind, e.statusReturned))
     : null;
   const autoblock = decideAutoblock(env, judgement);
-  // Soft signals on a request that was proxied under an Access identity can be
-  // planted by a third party (a cross-site GET carries the victim's Access
-  // cookie), so they never denylist that identity: label-only. Hard blocks and
-  // rate limits, and anonymous / api-key principals, stay eligible.
-  if (e.verdict === "flagged" && e.principal.kind === "access-jwt") autoblock.apply = false;
+  // Under an Access identity the request that triggers a judgement can be
+  // planted by a third party: a cross-site GET (a link, an <img>) carries the
+  // victim's Access cookie, and a page of them trips the rate limit too. So an
+  // Access-JWT principal is never denylisted: label-only, the evidence row and
+  // judgement still land for human review. Hard blocks (anonymous, keyed by IP)
+  // and api-key principals, whose credential a browser cannot be made to attach,
+  // stay eligible.
+  if (e.principal.kind === "access-jwt") autoblock.apply = false;
   // The KV write goes first so the hash-chained row records what actually
   // happened to the denylist (`applied`), not only what was decided (`requested`).
   const applied = await applyAutoblock(env, e.principal.key, autoblock, rc.requestId);

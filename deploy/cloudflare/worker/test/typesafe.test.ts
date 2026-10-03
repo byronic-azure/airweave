@@ -1,5 +1,5 @@
 import { env as testEnv } from "cloudflare:test";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { TYPESAFE_ENDPOINT, TYPESAFE_MODEL } from "../src/typesafe";
 import { sha256Hex } from "../src/util";
 import {
@@ -161,6 +161,11 @@ describe("TypeSafe verify-and-escalate", () => {
 
   describe("autoblock", () => {
     const principalKey = async () => `apikey:${await sha256Hex(API_KEY)}`;
+    // One issuer for the Access-JWT cases: jose caches the remote JWKS per isolate.
+    let issuer: Awaited<ReturnType<typeof makeAccessIssuer>>;
+    beforeAll(async () => {
+      issuer = await makeAccessIssuer();
+    });
 
     it("stays label-only by default even for a certain probe", async () => {
       serveTypeSafe(() => Response.json(typeSafeAnswer(0.99)));
@@ -193,7 +198,6 @@ describe("TypeSafe verify-and-escalate", () => {
     it("never denylists an Access-JWT principal on soft-only signals from a proxied request", async () => {
       // A cross-site GET carries the victim's Access cookie, so soft signals under
       // an Access identity can be planted by a third party: label-only, no block.
-      const issuer = await makeAccessIssuer();
       serveJwks(stub, issuer);
       serveTypeSafe(() => Response.json(typeSafeAnswer(0.99)));
       const env = makeEnv({
@@ -220,6 +224,43 @@ describe("TypeSafe verify-and-escalate", () => {
         env,
       );
       expect(again.status).toBe(200);
+    });
+
+    it("never denylists an Access-JWT principal that was rate limited either", async () => {
+      // A page of cross-site <img> loads can trip the limit under the victim's cookie.
+      serveJwks(stub, issuer);
+      serveTypeSafe(() => Response.json(typeSafeAnswer(0.99, "enumeration")));
+      const limiter = { async limit() { return { success: false }; } };
+      const env = makeEnv({
+        ...baseEnv(),
+        DENYLIST: testEnv.DENYLIST,
+        TYPESAFE_AUTOBLOCK: "1",
+        RATE_LIMITER: limiter,
+        AUTH_MODE: "access-jwt",
+        TEAM_DOMAIN,
+        POLICY_AUD,
+        GATEWAY_API_KEY: undefined,
+      });
+      const token = await issuer.sign({ email: "victim@example.test", sub: "user-1" });
+      const res = await run(
+        gatewayRequest("/collections", { apiKey: null, headers: { "Cf-Access-Jwt-Assertion": token } }),
+        env,
+      );
+      expect(res.status).toBe(429);
+      expect((await testEnv.DENYLIST.list()).keys).toHaveLength(0);
+      const rows = await judgementRows();
+      expect(rows[0]?.verdict).toBe("rate_limited");
+      expect(JSON.parse(rows[0]?.judgement_json ?? "null")).toMatchObject({
+        autoblock: { requested: false, applied: false },
+      });
+    });
+
+    it("still denylists a rate-limited api-key principal", async () => {
+      serveTypeSafe(() => Response.json(typeSafeAnswer(0.99, "enumeration")));
+      const limiter = { async limit() { return { success: false }; } };
+      const env = makeEnv({ ...baseEnv(), DENYLIST: testEnv.DENYLIST, TYPESAFE_AUTOBLOCK: "1", RATE_LIMITER: limiter });
+      expect((await run(gatewayRequest("/collections"), env)).status).toBe(429);
+      expect(await testEnv.DENYLIST.get(await principalKey())).not.toBeNull();
     });
 
     it("records applied: false when the DENYLIST write fails", async () => {

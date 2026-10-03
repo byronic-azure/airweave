@@ -9,7 +9,13 @@
 #             the api.<zone> policy allows) and they are sent as CF-Access-Client-Id /
 #             -Secret, or give /healthz its own Bypass policy (README, step 5)
 #   origin    optional (-o): the tunnel hostname REFUSES a request that lacks the
-#             Access service token (302/401/403); a 200 means the Worker can be bypassed
+#             Access service token (302/401/403); a 200 means the Worker can be bypassed.
+#             With ORIGIN_SERVICE_TOKEN_ID / ORIGIN_SERVICE_TOKEN_SECRET exported (the
+#             Worker's origin token) a second request carries the token and must be
+#             let through WITHOUT a Set-Cookie: CF_Authorization in the answer, which
+#             requires Zero Trust > Settings > Access > "Strict service token
+#             authentication" (README, step 4); a cookie there is a bearer credential
+#             for the origin hostname
 #   backend   optional (-i): a throw-away curl pod reaches the backend through the
 #             in-cluster Service name the tunnel routes to (mode A or B)
 #
@@ -24,7 +30,8 @@
 #                   B = airweave-backend (backend deployed in the cluster)
 #
 # Environment: KUBE_CONTEXT, GATEWAY_URL, ORIGIN_URL (defaults for the flags above),
-# CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET (service token for the gateway check).
+# CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET (service token for the gateway check),
+# ORIGIN_SERVICE_TOKEN_ID and ORIGIN_SERVICE_TOKEN_SECRET (origin token for the cookie check).
 #
 # Exits non-zero if any check that ran failed.
 set -euo pipefail
@@ -37,9 +44,11 @@ LOCAL_PORT="12000"
 BACKEND_MODE=""
 ACCESS_ID="${CF_ACCESS_CLIENT_ID:-}"
 ACCESS_SECRET="${CF_ACCESS_CLIENT_SECRET:-}"
+ORIGIN_TOKEN_ID="${ORIGIN_SERVICE_TOKEN_ID:-}"
+ORIGIN_TOKEN_SECRET="${ORIGIN_SERVICE_TOKEN_SECRET:-}"
 CURL_IMAGE="curlimages/curl:8.22.0"
 
-usage() { sed -n '2,29p' "$0"; }
+usage() { sed -n '2,36p' "$0"; }
 die() { echo "error: $*" >&2; exit 1; }
 
 while getopts "c:u:o:p:i:h" opt; do
@@ -159,6 +168,30 @@ if [ -n "$ORIGIN" ]; then
     000) fail origin "$url unreachable: $(cat "$WORK/curl.err")" ;;
     *) fail origin "$url -> $code (expected 302/401/403 from Access)" ;;
   esac
+  # With the Worker's own origin token: Access must let the request through and
+  # must NOT answer with a CF_Authorization session cookie. In non-strict mode Access
+  # mints one for every valid service-token request; the Worker drops it, but the
+  # setting is what makes the cookie worthless even if it ever leaked. The token
+  # goes through a 0600 file in $WORK, never on the command line.
+  if [ -n "$ORIGIN_TOKEN_ID" ] && [ -n "$ORIGIN_TOKEN_SECRET" ]; then
+    (umask 077; printf 'CF-Access-Client-Id: %s\nCF-Access-Client-Secret: %s\n' \
+      "$ORIGIN_TOKEN_ID" "$ORIGIN_TOKEN_SECRET" > "$WORK/origin-headers")
+    code="$(curl -sS -o /dev/null -D "$WORK/origin-headers.out" -w '%{http_code}' --max-time 15 \
+      -H "@$WORK/origin-headers" "$url" 2>"$WORK/curl.err" || true)"
+    case "$code" in
+      302|401|403) fail cookie "$url -> $code WITH the origin service token" \
+             "(token not in the Service Auth policy, or expired?)" ;;
+      000) fail cookie "$url unreachable with the origin service token: $(cat "$WORK/curl.err")" ;;
+      *) if grep -qi '^set-cookie:[[:space:]]*CF_Authorization=' "$WORK/origin-headers.out"; then
+           fail cookie "$url -> $code with the token but Access returned a CF_Authorization cookie." \
+             "Turn on Zero Trust > Settings > Access > Strict service token authentication (README, step 4)."
+         else
+           pass cookie "$url -> $code with the origin service token and no CF_Authorization cookie"
+         fi ;;
+    esac
+  else
+    echo "skip  cookie   export ORIGIN_SERVICE_TOKEN_ID/ORIGIN_SERVICE_TOKEN_SECRET to check the origin returns no Access cookie"
+  fi
 else
   echo "skip  origin   no origin URL (-o https://airweave-origin.<zone> or ORIGIN_URL)"
 fi

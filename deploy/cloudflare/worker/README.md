@@ -50,6 +50,11 @@ then adds `CF-Access-Client-Id/Secret` from its secrets, `X-Request-Id`,
 `X-Forwarded-Host`, `X-Forwarded-Proto` and `X-Forwarded-For` set to
 `CF-Connecting-IP` alone (omitted when that header is absent), so the client IP
 the backend logs is the one Cloudflare saw, never one the caller chose.
+`CF_*` cookies are dropped in both directions: a client-supplied Access cookie
+never reaches the origin, and the `CF_Authorization` session cookie Access mints
+for the origin hostname (unless "Strict service token authentication" is on) is
+never relayed to the client, where it would be a bearer credential for the
+origin that bypasses the Worker.
 
 ## Authentication modes
 
@@ -153,7 +158,10 @@ as a block. Hard-blocked and unauthenticated requests arrive before
 authentication, so their key is the client IP: such an entry denies proxied
 traffic only when the IP is the principal (`AUTH_MODE=off`), but it always
 stops further rejected requests from that IP being escalated until the TTL
-expires (see the escalation budget above).
+expires (see the escalation budget above). Access-JWT principals (`jwt:`) are
+never autoblocked, only labelled: a cross-site GET carries the victim's Access
+cookie, so a third party could otherwise get another user denied; the evidence
+row and judgement still land, and an operator can write the key by hand.
 
 ## Develop and test
 
