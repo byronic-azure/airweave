@@ -176,9 +176,10 @@ def check_secret_example(doc: dict, src: str) -> list[str]:
     data = doc.get("stringData") or {}
     if not data:
         errors.append(f"{src}: Secret example must use stringData so the placeholder is readable")
-    for key, value in data.items():
-        if PLACEHOLDER not in str(value):
-            errors.append(f"{src}: stringData.{key} must contain the {PLACEHOLDER} placeholder")
+    # The message carries nothing from the Secret document (not even a key name), so
+    # a validator log line can never contain secret material.
+    if any(PLACEHOLDER not in str(value) for value in data.values()):
+        errors.append(f"{src}: every stringData value must contain the {PLACEHOLDER} placeholder")
     if "data" in doc:
         errors.append(f"{src}: Secret example must not carry base64 'data'")
     return errors

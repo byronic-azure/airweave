@@ -63,7 +63,10 @@ function jwksFor(teamDomain: string): ReturnType<typeof createRemoteJWKSet> {
 }
 
 function normalizeTeamDomain(value: string): string {
-  return value.trim().replace(/\/+$/, "");
+  // A loop instead of /\/+$/: the regex is polynomial on input ending in many slashes.
+  let out = value.trim();
+  while (out.endsWith("/")) out = out.slice(0, -1);
+  return out;
 }
 
 function identityFromClaims(payload: JWTPayload): string | undefined {

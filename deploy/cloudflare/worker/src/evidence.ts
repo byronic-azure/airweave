@@ -118,8 +118,10 @@ function serialised<T>(task: () => Promise<T>): Promise<T> {
 function backoffMs(attempt: number): number {
   const delay = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
   const half = Math.floor(delay / 2);
+  // Scale the 32-bit value into the range instead of taking it modulo the range,
+  // which would bias the low end.
   const random = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
-  return half + (random % (delay - half + 1));
+  return half + Math.floor((random / 2 ** 32) * (delay - half + 1));
 }
 
 function sleep(ms: number): Promise<void> {

@@ -32,7 +32,10 @@ export interface CorsDecision {
 }
 
 function normalizeOrigin(value: string): string {
-  return value.trim().replace(/\/+$/, "").toLowerCase();
+  // A loop instead of /\/+$/: the regex is polynomial on input ending in many slashes.
+  let out = value.trim();
+  while (out.endsWith("/")) out = out.slice(0, -1);
+  return out.toLowerCase();
 }
 
 /** `ALLOWED_ORIGINS` is a comma-separated list; entries are normalised to lower-case, no trailing slash. */
