@@ -425,7 +425,11 @@ as one row each; a row that still cannot be written is logged in full
 rejected requests (400 from the hard rules, 401/403 carrying soft signals) are
 bounded per principal key by the rate limiter and the denylist, so a flood from one
 IP costs at most `simple.limit` TypeSafe calls and D1 appends per period; the rest
-show up as `escalation_suppressed` log lines.
+show up as `escalation_suppressed` log lines. Rate-limited (429) requests, whose
+own bucket is exhausted by definition, are budgeted under a separate
+`esc:<principal key>` limiter key with the same `simple.limit` per period, so a
+client retry storm or a page of cross-site loads under a victim's Access cookie
+cannot run up TypeSafe calls or evidence rows without limit either.
 
 **What the chain shows, and what it cannot.** `/evidence/verify` recomputes every
 digest from the genesis value and localises an in-place edit (`hash_mismatch`), a
@@ -479,14 +483,16 @@ unauthenticated requests are keyed by IP, so such an entry denies proxied traffi
 only when the IP *is* the principal (`AUTH_MODE=off`); what it always does is stop
 further rejected requests from that IP being escalated (no more TypeSafe calls or
 evidence rows until the TTL expires), the budget described under the evidence log.
-`jwt:` principals are **never** autoblocked, only labelled: the request that earns
-the judgement can be planted by a third party, because a cross-site GET (a link, an
-`<img>`) carries the victim's `CF_Authorization` cookie for `api.<zone>` and Access
-attaches their identity, and a page of such loads trips the rate limit too. The
-evidence row and judgement still land for human review; an operator who wants a
-user blocked writes the `jwt:` key by hand (below). `apikey:` principals stay
-eligible, since a browser cannot be made to attach the `X-Airweave-Gateway-Key`
-header cross-site.
+`jwt:` principals that carry a user identity (an `email` claim) are **never**
+autoblocked, only labelled: the request that earns the judgement can be planted by
+a third party, because a cross-site GET (a link, an `<img>`) carries the victim's
+`CF_Authorization` cookie for `api.<zone>` and Access attaches their identity, and
+a page of such loads trips the rate limit too. The evidence row and judgement still
+land for human review; an operator who wants a user blocked writes the `jwt:` key
+by hand (below). `apikey:` principals and Access service tokens (assertions carrying
+only `common_name`, as recommended for machine clients in step 5) stay eligible,
+since a browser cannot be made to attach the `X-Airweave-Gateway-Key` or
+`CF-Access-Client-Id`/`-Secret` headers cross-site.
 `judgement_json.autoblock` records `requested` (the gate fired) and `applied` (the
 KV write succeeded) separately, because the KV write runs before the row is sealed
 and a failed write must not be recorded as a block. Inspect or

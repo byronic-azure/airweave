@@ -158,10 +158,13 @@ as a block. Hard-blocked and unauthenticated requests arrive before
 authentication, so their key is the client IP: such an entry denies proxied
 traffic only when the IP is the principal (`AUTH_MODE=off`), but it always
 stops further rejected requests from that IP being escalated until the TTL
-expires (see the escalation budget above). Access-JWT principals (`jwt:`) are
-never autoblocked, only labelled: a cross-site GET carries the victim's Access
-cookie, so a third party could otherwise get another user denied; the evidence
-row and judgement still land, and an operator can write the key by hand.
+expires (see the escalation budget above). Access-JWT principals that carry a
+user identity (an `email` claim) are never autoblocked, only labelled: a
+cross-site GET carries the victim's Access cookie, so a third party could
+otherwise get another user denied; the evidence row and judgement still land,
+and an operator can write the key by hand. Access service tokens (assertions
+with only `common_name`) stay eligible like `apikey:` principals, because a
+browser cannot be made to send `CF-Access-Client-Id`/`-Secret` cross-site.
 
 ## Develop and test
 
@@ -182,8 +185,11 @@ reproducible with `npm ci`.
   (and a TypeSafe call when enabled), never a blocked request.
 - TypeSafe spend and D1 writes for rejected requests are bounded by the
   escalation budget (the rate limiter's `simple.limit` per period per principal
-  key, and the denylist); rate-limited and proxied-but-flagged requests from an
-  authenticated principal are escalated one for one.
+  key, and the denylist). Rate-limited (429) requests are budgeted under a
+  separate `esc:<principal key>` limiter key, so a flood of 429s records at most
+  `simple.limit` judgements and rows per period (the rest log
+  `escalation_suppressed` with `why: escalation_budget`). Only proxied-but-flagged
+  requests from an authenticated principal are still escalated one for one.
 - `AUTH_ENABLED=true` must be set in Airweave's own `.env`. The tunnel bypasses
   any control that exists only in front of it, exactly as with the MicroK8s
   NodePort setup.
