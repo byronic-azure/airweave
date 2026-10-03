@@ -114,14 +114,27 @@ function serialised<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/**
+ * Uniform integer in [0, n) by rejection sampling on a bitmask: neither modulo
+ * nor division-and-rounding of the 32-bit value, both of which bias the result.
+ * The mask is the smallest all-ones value >= n - 1, so fewer than two draws are
+ * needed on average.
+ */
+function randomBelow(n: number): number {
+  if (n <= 1) return 0;
+  const mask = 2 ** Math.ceil(Math.log2(n)) - 1;
+  const buf = new Uint32Array(1);
+  for (;;) {
+    const candidate = (crypto.getRandomValues(buf)[0] ?? 0) & mask;
+    if (candidate < n) return candidate;
+  }
+}
+
 /** Equal-jitter exponential backoff. Jitter comes from crypto, never Math.random. */
 function backoffMs(attempt: number): number {
   const delay = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
   const half = Math.floor(delay / 2);
-  // Scale the 32-bit value into the range instead of taking it modulo the range,
-  // which would bias the low end.
-  const random = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
-  return half + Math.floor((random / 2 ** 32) * (delay - half + 1));
+  return half + randomBelow(delay - half + 1);
 }
 
 function sleep(ms: number): Promise<void> {
