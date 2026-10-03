@@ -1,0 +1,19 @@
+# Local secrets for `wrangler dev` (copy to .dev.vars, which is git-ignored).
+# Production values are set with `npx wrangler secret put <NAME>` and never
+# committed. Plain configuration lives in wrangler.toml [vars].
+
+# Access service token that the tunnel's Access application accepts.
+ORIGIN_SERVICE_TOKEN_ID=REPLACE_ME.access
+ORIGIN_SERVICE_TOKEN_SECRET=REPLACE_ME
+
+# Only read when AUTH_MODE = "api-key" (generate one: openssl rand -hex 32).
+GATEWAY_API_KEY=REPLACE_ME
+
+# Optional: enables TypeSafe judgements for flagged requests.
+# TYPESAFE_API_KEY=REPLACE_ME
+
+# Handy local overrides (vars can be overridden here too):
+# ORIGIN_URL=http://localhost:8001
+# AUTH_MODE=off
+# ALLOW_INSECURE_DEV=1
+# ALLOWED_ORIGINS=http://localhost:8080

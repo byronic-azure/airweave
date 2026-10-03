@@ -1,0 +1,84 @@
+# airweave-edge-gateway — Cloudflare Worker that fronts a Cloudflare Tunnel to a
+# local Airweave backend (see deploy/cloudflare/README.md for the full picture).
+#
+#   client -> Worker (this) -> ORIGIN_URL (tunnel hostname, Access service-token only)
+#          -> cloudflared in Docker Desktop Kubernetes -> Airweave backend :8001
+#
+# Quick start:
+#   npm install
+#   cp .dev.vars.example .dev.vars            # local secrets, never committed
+#   npm run dev                               # applies local D1 migrations, then http://localhost:8787/healthz
+#   npm test && npm run typecheck
+#   npm run deploy
+#
+# Before the first deploy, create the optional bindings and paste their ids below:
+#   npx wrangler kv namespace create DENYLIST                 -> [[kv_namespaces]].id
+#   npx wrangler d1 create airweave-edge-evidence             -> [[d1_databases]].database_id
+#   npx wrangler d1 migrations apply airweave-edge-evidence --remote
+# and set the secrets (prompted, never stored in this file):
+#   npx wrangler secret put GATEWAY_API_KEY                   # only for AUTH_MODE = "api-key"
+#   npx wrangler secret put ORIGIN_SERVICE_TOKEN_ID           # Access service token for the tunnel app
+#   npx wrangler secret put ORIGIN_SERVICE_TOKEN_SECRET
+#   npx wrangler secret put TYPESAFE_API_KEY                  # optional, enables TypeSafe judgements
+
+name = "airweave-edge-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Serve the gateway on a hostname in your zone. Uncomment and edit, or attach the
+# route in the dashboard (Workers & Pages > airweave-edge-gateway > Settings > Domains & Routes).
+# routes = [
+#   { pattern = "api.example.com/*", zone_name = "example.com" }
+# ]
+
+[observability]
+enabled = true
+
+# Plain-text configuration. Secrets go through `wrangler secret put` (see above),
+# or into .dev.vars for `wrangler dev`.
+[vars]
+# Where to proxy to: the Cloudflare Tunnel public hostname (an Access application
+# whose only policy allows the service token held in ORIGIN_SERVICE_TOKEN_*).
+ORIGIN_URL = "https://airweave-origin.example.com"
+# Comma-separated browser origins allowed to call the gateway (exact match).
+ALLOWED_ORIGINS = "http://localhost:8080,https://app.example.com"
+# "access-jwt" (default) | "api-key" | "off" (only with ALLOW_INSECURE_DEV = "1")
+AUTH_MODE = "access-jwt"
+# Cloudflare Access team domain and the Application Audience (AUD) tag of the
+# Access application that protects the gateway hostname.
+TEAM_DOMAIN = "https://example.cloudflareaccess.com"
+POLICY_AUD = "REPLACE_ME"
+# Must be exactly "1" to let AUTH_MODE = "off" through. Never set this in production.
+ALLOW_INSECURE_DEV = "0"
+# Retry-After hint for 429s; keep in sync with [[unsafe.bindings]].simple.period below.
+RATE_LIMIT_PERIOD_SECONDS = "60"
+# TypeSafe verify-and-escalate knobs (label-only unless TYPESAFE_AUTOBLOCK = "1").
+TYPESAFE_AUTOBLOCK = "0"
+TYPESAFE_BLOCK_THRESHOLD = "0.95"
+TYPESAFE_BLOCK_TTL_SECONDS = "900"
+
+# Workers rate limiting binding (per-colo, approximate). `period` must be 10 or 60.
+# The namespace_id is an arbitrary positive integer that is unique within the account.
+# The code treats the binding as optional: remove this block and the gateway adds
+# `X-Airweave-RateLimit: disabled` to every response instead of limiting.
+[[unsafe.bindings]]
+name = "RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 100, period = 60 }
+
+# Optional: KV namespace used by TypeSafe autoblock (principals denied for a TTL).
+# Create with:  npx wrangler kv namespace create DENYLIST
+[[kv_namespaces]]
+binding = "DENYLIST"
+id = "REPLACE_ME"
+
+# Optional: D1 database for the tamper-evident evidence log.
+# Create with:  npx wrangler d1 create airweave-edge-evidence
+# Migrate with: npx wrangler d1 migrations apply airweave-edge-evidence --remote
+[[d1_databases]]
+binding = "EVIDENCE_DB"
+database_name = "airweave-edge-evidence"
+database_id = "REPLACE_ME"
+migrations_dir = "migrations"

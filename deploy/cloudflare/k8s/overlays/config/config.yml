@@ -1,0 +1,40 @@
+# cloudflared configuration for the LOCALLY-managed tunnel (overlays/config).
+# Shipped into the pod as a ConfigMap and read with
+#   cloudflared tunnel --config /etc/cloudflared/config/config.yml run
+# (the ConfigMap is mounted at /etc/cloudflared/config, the credentials Secret
+# beside it at /etc/cloudflared/creds; see deployment-patch.yaml).
+#
+# Validate after editing (validate.sh does this when cloudflared is installed):
+#   cloudflared tunnel --config deploy/cloudflare/k8s/overlays/config/config.yml ingress validate
+#   cloudflared tunnel --config deploy/cloudflare/k8s/overlays/config/config.yml \
+#     ingress rule https://airweave-origin.<zone>/health/ready
+#
+# --metrics and --no-autoupdate are set on the command line in base/deployment.yaml.
+
+# REPLACE with the UUID printed by `cloudflared tunnel create airweave-origin`.
+# It is an identifier, not a secret; the secret part is credentials.json.
+tunnel: 00000000-0000-0000-0000-000000000000
+# Mounted from Secret "cloudflared-credentials" (see tunnel-credentials.example.yaml).
+credentials-file: /etc/cloudflared/creds/credentials.json
+
+ingress:
+  # Mode A (default): the Airweave backend runs under docker compose on the
+  # laptop and publishes 8001 on the host. airweave-backend-host is the
+  # ExternalName Service in base/ that CNAMEs to host.docker.internal.
+  # REPLACE the hostname with the public hostname you routed to this tunnel.
+  - hostname: airweave-origin.example.com
+    service: http://airweave-backend-host.airweave.svc.cluster.local:8001
+    originRequest:
+      connectTimeout: 10s
+
+  # Mode B: the backend is deployed into this cluster behind the ClusterIP
+  # Service airweave-backend (base/service-backend.yaml). Use INSTEAD of the
+  # mode A rule above; with both present only the first match wins.
+  # - hostname: airweave-origin.example.com
+  #   service: http://airweave-backend.airweave.svc.cluster.local:8001
+  #   originRequest:
+  #     connectTimeout: 10s
+
+  # Catch-all: cloudflared requires the last rule to match every request.
+  # Anything that is not the Airweave hostname gets a bare 404.
+  - service: http_status:404

@@ -1,0 +1,115 @@
+name: Edge Gateway
+
+# Checks for deploy/cloudflare: the airweave-edge-gateway Worker and the
+# cloudflared Kubernetes manifests. See deploy/cloudflare/README.md, "Run the checks".
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "deploy/cloudflare/**"
+      - ".github/workflows/edge-gateway.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "deploy/cloudflare/**"
+      - ".github/workflows/edge-gateway.yml"
+
+permissions:
+  contents: read
+
+env:
+  # Tools for the manifests job. Bump a version and its sha256 together:
+  #   kubectl      https://dl.k8s.io/release/<version>/bin/linux/amd64/kubectl.sha256
+  #   kubeconform  CHECKSUMS file on https://github.com/yannh/kubeconform/releases
+  #   cloudflared  no checksum file is published; sha256sum of the release asset
+  KUBECTL_VERSION: v1.37.1
+  KUBECTL_SHA256: 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
+  KUBECONFORM_VERSION: v0.8.0
+  KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+  CLOUDFLARED_VERSION: "2026.9.3"
+  CLOUDFLARED_SHA256: 77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2
+
+jobs:
+  worker:
+    name: Worker typecheck and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./deploy/cloudflare/worker
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: "./deploy/cloudflare/worker/package-lock.json"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test (vitest inside workerd)
+        run: npm test
+
+      # Bundles with the real wrangler/workerd pipeline without an account; this
+      # catches entry-module and wrangler.toml problems the test pool cannot see.
+      - name: Bundle check (wrangler deploy --dry-run)
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: npx wrangler deploy --dry-run --outdir "$RUNNER_TEMP/edge-gateway-dist"
+
+  manifests:
+    name: Manifests and scripts (validate.sh)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Install PyYAML (used by scripts/check_manifests.py)
+        run: python -m pip install --disable-pip-version-check "pyyaml>=6,<7"
+
+      - name: Install kubectl, kubeconform, cloudflared and shellcheck
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/tools"
+          mkdir -p "$tools"
+          cd "$tools"
+
+          curl -fsSLo kubectl \
+            "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  kubectl" | sha256sum --check --strict
+
+          curl -fsSLo kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tar.gz" | sha256sum --check --strict
+          tar -xzf kubeconform.tar.gz kubeconform
+          rm -f kubeconform.tar.gz
+
+          curl -fsSLo cloudflared \
+            "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64"
+          echo "${CLOUDFLARED_SHA256}  cloudflared" | sha256sum --check --strict
+
+          chmod +x kubectl kubeconform cloudflared
+          # ubuntu-latest ships shellcheck; install it only if an image drops it.
+          command -v shellcheck >/dev/null 2>&1 \
+            || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends shellcheck; }
+
+          ./kubectl version --client
+          ./kubeconform -v
+          ./cloudflared --version
+          shellcheck --version | sed -n 2p
+
+      # -s: a check that could not run (missing tool, schema download failure) fails the job.
+      - name: Validate manifests and scripts
+        run: deploy/cloudflare/scripts/validate.sh -b "$RUNNER_TEMP/tools" -s

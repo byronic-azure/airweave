@@ -1,0 +1,51 @@
+# Strategic-merge patch: run cloudflared from the declarative config.yml and
+# mount the tunnel credentials beside it. `command` is replaced wholesale, so
+# keep it in sync with base/deployment.yaml apart from the --config pair: a
+# "--protocol http2" pair added there must be added here too, whereas the env
+# var TUNNEL_TRANSPORT_PROTOCOL set in base/ needs no copy (env is merged).
+#
+# The ConfigMap and the Secret are mounted as SIBLINGS (/etc/cloudflared/config
+# and /etc/cloudflared/creds), never one inside the other. ConfigMap and Secret
+# volumes are always read-only, and a mount point that must be created inside an
+# already read-only mount fails at container start on some runtimes (runc:
+# "make mountpoint ... mkdirat ...: read-only file system"). Cloudflare's own
+# Kubernetes example uses this layout.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: airweave
+spec:
+  template:
+    spec:
+      containers:
+        - name: cloudflared
+          command:
+            - cloudflared
+            - tunnel
+            - --no-autoupdate
+            - --loglevel
+            - info
+            - --metrics
+            - 0.0.0.0:2000
+            - --config
+            - /etc/cloudflared/config/config.yml
+            - run
+          volumeMounts:
+            - name: config
+              mountPath: /etc/cloudflared/config
+              readOnly: true
+            - name: credentials
+              # config.yml points credentials-file here.
+              mountPath: /etc/cloudflared/creds
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            # kustomize rewrites this to the hash-suffixed generated name.
+            name: cloudflared-config
+        - name: credentials
+          secret:
+            secretName: cloudflared-credentials
+            # Owner root, group 65532 (fsGroup) may read; nobody else.
+            defaultMode: 0440

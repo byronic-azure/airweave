@@ -1,0 +1,19 @@
+# Default overlay: a REMOTELY-managed tunnel. The tunnel's identity is a token
+# (Zero Trust > Networks > Tunnels > <tunnel> > Install connector) and its
+# routes live in the dashboard under Public Hostname:
+#   airweave-origin.<zone> -> http://airweave-backend-host.airweave.svc.cluster.local:8001  (mode A)
+#   airweave-origin.<zone> -> http://airweave-backend.airweave.svc.cluster.local:8001       (mode B)
+#
+# The Secret "cloudflared-token" is deliberately NOT part of this kustomization
+# so no real token ever sits in a tracked file. Create it from
+# tunnel-token.example.yaml (or kubectl create secret) before applying; up.sh
+# checks it is there.
+#
+#   deploy/cloudflare/scripts/up.sh token
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: airweave
+resources:
+  - ../../base
+patches:
+  - path: deployment-patch.yaml
