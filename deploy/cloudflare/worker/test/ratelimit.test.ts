@@ -43,7 +43,12 @@ describe("rate limiting", () => {
   afterEach(() => stub.restore());
 
   it("answers 429 with Retry-After and records evidence when the binding says no", async () => {
+    // Only the principal's own bucket is exhausted; the `esc:` evidence budget stays open.
     const limiter = fakeLimiter(false);
+    limiter.limit = async ({ key }) => {
+      limiter.keys.push(key);
+      return { success: key.startsWith("esc:") };
+    };
     const env = makeEnv({ RATE_LIMITER: limiter, EVIDENCE_DB: testEnv.EVIDENCE_DB });
     const res = await run(gatewayRequest("/collections"), env);
     expect(res.status).toBe(429);

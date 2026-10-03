@@ -3,6 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { TYPESAFE_ENDPOINT, TYPESAFE_MODEL } from "../src/typesafe";
 import { sha256Hex } from "../src/util";
 import {
+  type AccessIssuer,
   API_KEY,
   FetchStub,
   gatewayRequest,
@@ -54,6 +55,12 @@ async function judgementRows(): Promise<Array<{ verdict: string; judgement_json:
 describe("TypeSafe verify-and-escalate", () => {
   let stub: FetchStub;
   let calls: TypeSafeCall[];
+  // One issuer for every Access-JWT test: auth.ts caches the remote JWKS per team
+  // domain across requests, so a second issuer's tokens would fail verification.
+  let issuer: AccessIssuer;
+  beforeAll(async () => {
+    issuer = await makeAccessIssuer();
+  });
 
   function serveTypeSafe(reply: () => Response): void {
     stub.on(TYPESAFE_ORIGIN, async (_request, captured) => {
@@ -230,7 +237,7 @@ describe("TypeSafe verify-and-escalate", () => {
       // A page of cross-site <img> loads can trip the limit under the victim's cookie.
       serveJwks(stub, issuer);
       serveTypeSafe(() => Response.json(typeSafeAnswer(0.99, "enumeration")));
-      const limiter = { async limit() { return { success: false }; } };
+      const limiter = { async limit({ key }: { key: string }) { return { success: key.startsWith("esc:") }; } };
       const env = makeEnv({
         ...baseEnv(),
         DENYLIST: testEnv.DENYLIST,
@@ -257,14 +264,13 @@ describe("TypeSafe verify-and-escalate", () => {
 
     it("still denylists a rate-limited api-key principal", async () => {
       serveTypeSafe(() => Response.json(typeSafeAnswer(0.99, "enumeration")));
-      const limiter = { async limit() { return { success: false }; } };
+      const limiter = { async limit({ key }: { key: string }) { return { success: key.startsWith("esc:") }; } };
       const env = makeEnv({ ...baseEnv(), DENYLIST: testEnv.DENYLIST, TYPESAFE_AUTOBLOCK: "1", RATE_LIMITER: limiter });
       expect((await run(gatewayRequest("/collections"), env)).status).toBe(429);
       expect(await testEnv.DENYLIST.get(await principalKey())).not.toBeNull();
     });
 
     it("still denylists an Access service token (no email claim), which a browser cannot be made to send", async () => {
-      const issuer = await makeAccessIssuer();
       serveJwks(stub, issuer);
       serveTypeSafe(() => Response.json(typeSafeAnswer(0.99)));
       const env = makeEnv({
