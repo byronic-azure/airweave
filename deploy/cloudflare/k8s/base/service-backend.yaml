@@ -1,0 +1,24 @@
+# Mode B: the Airweave backend deployed into this cluster (a Deployment labelled
+# app: airweave-backend, listening on 8001). Mirrors deploy/microk8s/services.yaml
+# but ClusterIP only: the tunnel reaches it in-cluster, so no NodePort is needed
+# and nothing listens on the laptop's interfaces. Tunnel route:
+#   http://airweave-backend.airweave.svc.cluster.local:8001
+# Harmless in mode A, where no pod matches the selector and it has no endpoints.
+apiVersion: v1
+kind: Service
+metadata:
+  name: airweave-backend
+  namespace: airweave
+  labels:
+    app.kubernetes.io/name: airweave-backend
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: airweave
+spec:
+  type: ClusterIP
+  selector:
+    app: airweave-backend
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8001
+      targetPort: 8001

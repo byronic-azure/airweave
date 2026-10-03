@@ -1,0 +1,20 @@
+# Base for the cloudflared connector that links the Cloudflare edge gateway
+# Worker to an Airweave backend running on a developer laptop.
+#
+#   client -> Worker airweave-edge-gateway -> https://airweave-origin.<zone>
+#          -> Cloudflare Tunnel -> cloudflared (this Deployment, Docker Desktop
+#          Kubernetes) -> Airweave backend :8001
+#
+# Do not apply the base on its own: it has no tunnel identity. Use an overlay:
+#   overlays/token   remotely-managed tunnel, TUNNEL_TOKEN from a Secret (default)
+#   overlays/config  locally-managed tunnel, declarative config.yml + credentials
+#
+# Validate: deploy/cloudflare/scripts/validate.sh
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: airweave
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service-backend-host.yaml
+  - service-backend.yaml

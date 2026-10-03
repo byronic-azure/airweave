@@ -1,0 +1,25 @@
+# Template for the Secret that carries the remotely-managed tunnel's token.
+#
+#   cp tunnel-token.example.yaml tunnel-token.yaml      # tunnel-token.yaml is gitignored
+#   # paste the token from Zero Trust > Networks > Tunnels > <tunnel> > Install connector
+#   deploy/cloudflare/scripts/up.sh token               # applies it, then the overlay
+#
+# Or skip the file entirely and create the Secret directly:
+#   kubectl --context docker-desktop create namespace airweave
+#   kubectl --context docker-desktop -n airweave create secret generic cloudflared-token \
+#     --from-literal=TUNNEL_TOKEN='<token>'
+#
+# Never commit a real token. up.sh refuses to apply a copy that still contains
+# the REPLACE_WITH_ placeholder.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflared-token
+  namespace: airweave
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/component: tunnel
+    app.kubernetes.io/part-of: airweave
+type: Opaque
+stringData:
+  TUNNEL_TOKEN: REPLACE_WITH_TUNNEL_TOKEN

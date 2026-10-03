@@ -1,0 +1,4 @@
+# Real tunnel secrets live next to their *.example.yaml templates and must
+# never be committed. up.sh applies these copies when they exist.
+overlays/*/tunnel-token.yaml
+overlays/*/tunnel-credentials.yaml

@@ -1,0 +1,34 @@
+# Alternative overlay: a LOCALLY-managed tunnel, fully declarative. The tunnel
+# id, credentials file and ingress rules come from config.yml (shipped as a
+# ConfigMap) instead of the dashboard.
+#
+# One-time setup on the laptop:
+#   cloudflared tunnel login
+#   cloudflared tunnel create airweave-origin                       # prints the UUID
+#   cloudflared tunnel route dns airweave-origin airweave-origin.<zone>
+#   kubectl --context docker-desktop create namespace airweave
+#   kubectl --context docker-desktop -n airweave create secret generic cloudflared-credentials \
+#     --from-file=credentials.json="$HOME/.cloudflared/<UUID>.json"
+# then put the UUID and hostname into config.yml and run
+#   deploy/cloudflare/scripts/up.sh config
+#
+# The Secret is not part of this kustomization (see tunnel-credentials.example.yaml).
+# The ConfigMap name gets a content hash suffix, so editing config.yml and
+# re-running up.sh rolls the Deployment automatically; stale ConfigMaps are
+# cleaned up by down.sh via the labels below.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: airweave
+resources:
+  - ../../base
+configMapGenerator:
+  - name: cloudflared-config
+    files:
+      - config.yml
+    options:
+      labels:
+        app.kubernetes.io/name: cloudflared
+        app.kubernetes.io/component: tunnel
+        app.kubernetes.io/part-of: airweave
+patches:
+  - path: deployment-patch.yaml
