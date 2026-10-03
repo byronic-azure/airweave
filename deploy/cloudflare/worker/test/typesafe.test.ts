@@ -3,7 +3,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { TYPESAFE_ENDPOINT, TYPESAFE_MODEL } from "../src/typesafe";
 import { sha256Hex } from "../src/util";
 import {
-  type AccessIssuer,
   API_KEY,
   FetchStub,
   gatewayRequest,
@@ -55,12 +54,6 @@ async function judgementRows(): Promise<Array<{ verdict: string; judgement_json:
 describe("TypeSafe verify-and-escalate", () => {
   let stub: FetchStub;
   let calls: TypeSafeCall[];
-  // One issuer for every Access-JWT test: auth.ts caches the remote JWKS per team
-  // domain across requests, so a second issuer's tokens would fail verification.
-  let issuer: AccessIssuer;
-  beforeAll(async () => {
-    issuer = await makeAccessIssuer();
-  });
 
   function serveTypeSafe(reply: () => Response): void {
     stub.on(TYPESAFE_ORIGIN, async (_request, captured) => {
