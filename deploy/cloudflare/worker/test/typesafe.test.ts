@@ -2,7 +2,20 @@ import { env as testEnv } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TYPESAFE_ENDPOINT, TYPESAFE_MODEL } from "../src/typesafe";
 import { sha256Hex } from "../src/util";
-import { API_KEY, ORIGIN, SERVICE_TOKEN_SECRET, FetchStub, gatewayRequest, makeEnv, resetStorage, run } from "./helpers";
+import {
+  API_KEY,
+  FetchStub,
+  gatewayRequest,
+  makeAccessIssuer,
+  makeEnv,
+  ORIGIN,
+  POLICY_AUD,
+  resetStorage,
+  run,
+  serveJwks,
+  SERVICE_TOKEN_SECRET,
+  TEAM_DOMAIN,
+} from "./helpers";
 
 const TYPESAFE_ORIGIN = new URL(TYPESAFE_ENDPOINT).origin;
 const TYPESAFE_KEY = "ts-secret-key-abcdef";
@@ -175,6 +188,38 @@ describe("TypeSafe verify-and-escalate", () => {
       expect(second.status).toBe(403);
       expect(((await second.json()) as { error: string }).error).toBe("principal_denied");
       expect(stub.callsTo(ORIGIN)).toHaveLength(originCallsBefore);
+    });
+
+    it("never denylists an Access-JWT principal on soft-only signals from a proxied request", async () => {
+      // A cross-site GET carries the victim's Access cookie, so soft signals under
+      // an Access identity can be planted by a third party: label-only, no block.
+      const issuer = await makeAccessIssuer();
+      serveJwks(stub, issuer);
+      serveTypeSafe(() => Response.json(typeSafeAnswer(0.99)));
+      const env = makeEnv({
+        ...baseEnv(),
+        DENYLIST: testEnv.DENYLIST,
+        TYPESAFE_AUTOBLOCK: "1",
+        AUTH_MODE: "access-jwt",
+        TEAM_DOMAIN,
+        POLICY_AUD,
+        GATEWAY_API_KEY: undefined,
+      });
+      const token = await issuer.sign({ email: "victim@example.test", sub: "user-1" });
+      const res = await run(
+        gatewayRequest(FLAGGED_PATH, { apiKey: null, headers: { "Cf-Access-Jwt-Assertion": token } }),
+        env,
+      );
+      expect(res.status).toBe(200);
+      expect((await testEnv.DENYLIST.list()).keys).toHaveLength(0);
+      expect(JSON.parse((await judgementRows())[0]?.judgement_json ?? "null")).toMatchObject({
+        autoblock: { requested: false, applied: false },
+      });
+      const again = await run(
+        gatewayRequest("/collections", { apiKey: null, headers: { "Cf-Access-Jwt-Assertion": token } }),
+        env,
+      );
+      expect(again.status).toBe(200);
     });
 
     it("records applied: false when the DENYLIST write fails", async () => {

@@ -14,6 +14,9 @@ describe("heuristics (unit)", () => {
   it("decodes nested percent-encoding and flags undecodable input", () => {
     expect(deepDecode("/a/%252e%252e/b")).toEqual({ value: "/a/../b", malformed: false });
     expect(deepDecode("/100%")).toEqual({ value: "/100%", malformed: true });
+    // one invalid escape must not abort decoding and shield the `..` that follows it
+    expect(deepDecode("/a/%ff/%252e%252e/b")).toEqual({ value: "/a/\uFFFD/../b", malformed: true });
+    expect(deepDecode("/a/%c0/%2e%2e/b").value).toBe("/a/\uFFFD/../b");
     expect(deepDecode("/plain")).toEqual({ value: "/plain", malformed: false });
   });
 
@@ -58,6 +61,7 @@ describe("heuristics (gateway)", () => {
   it.each([
     ["double-encoded traversal", "/api/%252e%252e/%252e%252e/etc/passwd", "path_traversal"],
     ["semicolon traversal", "/api/..;/admin", "path_traversal"],
+    ["traversal shielded by an invalid escape", "/api/%ff/%252e%252e/etc/passwd", "path_traversal"],
     ["null byte", "/api/file%00.json", "null_byte"],
   ])("blocks %s with 400 before authentication and records evidence", async (_name, path, reason) => {
     const res = await run(gatewayRequest(path, { apiKey: null }), env());

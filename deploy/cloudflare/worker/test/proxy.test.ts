@@ -73,6 +73,27 @@ describe("proxy", () => {
     expect(Object.keys(h).some((k) => k.startsWith("cf-access-") && !k.startsWith("cf-access-client-"))).toBe(false);
   });
 
+  it("keeps Access cookies on the gateway side in both directions", async () => {
+    let upstreamCookie: string | null | undefined;
+    stub.restore();
+    stub = new FetchStub().on(ORIGIN, (request) => {
+      upstreamCookie = request.headers.get("Cookie");
+      const headers = new Headers({ "Content-Type": "text/plain" });
+      headers.append("Set-Cookie", "CF_Authorization=origin-session; Path=/; HttpOnly");
+      headers.append("Set-Cookie", "cf_appsession=abc; Path=/");
+      headers.append("Set-Cookie", "theme=dark; Path=/");
+      return new Response("ok", { headers });
+    });
+    const res = await run(
+      gatewayRequest("/collections", { headers: { Cookie: "CF_Authorization=stolen; theme=dark" } }),
+      makeEnv(),
+    );
+    expect(res.status).toBe(200);
+    expect(upstreamCookie).toBe("theme=dark");
+    const setCookies = [...res.headers].filter(([name]) => name === "set-cookie").map(([, value]) => value);
+    expect(setCookies).toEqual(["theme=dark; Path=/"]);
+  });
+
   it("omits X-Forwarded-For rather than trusting the client when CF-Connecting-IP is absent", async () => {
     const request = new Request(`${GATEWAY}/x`, {
       headers: { "X-Airweave-Gateway-Key": API_KEY, "X-Forwarded-For": "10.0.0.1", "X-Real-IP": "10.8.8.8" },

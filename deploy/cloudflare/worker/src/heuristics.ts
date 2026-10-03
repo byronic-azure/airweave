@@ -3,7 +3,11 @@
  *
  * Hard rules reject the request with 400 before any authentication work:
  *   - method outside GET/POST/PUT/PATCH/DELETE/OPTIONS/HEAD
- *   - path traversal (`..` segments, including percent- and double-encoded forms)
+ *   - path traversal (`..` segments, including percent- and double-encoded forms).
+ *     Note the boundary: Cloudflare's edge and the Workers runtime resolve plain and
+ *     single-percent-encoded dot segments (`/a/../b`, `/a/%2e%2e/b`) before the Worker
+ *     runs, so those never reach the Worker or the origin. The rule covers what does
+ *     arrive: double-encoded, `..;`, backslash and invalid-escape-shielded spellings.
  *   - null bytes in the URL or a header value
  *
  * Soft signals never block. They tag the request so it gets an evidence row
@@ -70,20 +74,54 @@ interface Decoded {
   malformed: boolean;
 }
 
+const LENIENT_DECODER = new TextDecoder(); // non-fatal: invalid UTF-8 becomes U+FFFD
+
+/**
+ * One percent-decoding pass that never throws: every valid `%XX` becomes a byte,
+ * byte runs are UTF-8 decoded with replacement characters for invalid sequences,
+ * and a bare `%` stays literal. `decodeURIComponent` would abort on the first bad
+ * escape, and one `%ff` anywhere in the path must not shield a `..` from inspection.
+ */
+function lenientDecodeOnce(input: string): Decoded {
+  let out = "";
+  let malformed = false;
+  const bytes: number[] = [];
+  const flush = (): void => {
+    if (bytes.length === 0) return;
+    const text = LENIENT_DECODER.decode(new Uint8Array(bytes));
+    if (text.includes("\uFFFD")) malformed = true;
+    out += text;
+    bytes.length = 0;
+  };
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (ch === "%") {
+      const hex = input.slice(i + 1, i + 3);
+      if (/^[0-9a-fA-F]{2}$/.test(hex)) {
+        bytes.push(parseInt(hex, 16));
+        i += 2;
+        continue;
+      }
+      malformed = true;
+    }
+    flush();
+    out += ch;
+  }
+  flush();
+  return { value: out, malformed };
+}
+
 /** Percent-decode repeatedly (bounded) so `%252e%252e` becomes `..`; flags undecodable input. */
 export function deepDecode(input: string, rounds = DECODE_ROUNDS): Decoded {
   let current = input;
+  let malformed = false;
   for (let i = 0; i < rounds; i++) {
-    let next: string;
-    try {
-      next = decodeURIComponent(current);
-    } catch {
-      return { value: current, malformed: true };
-    }
-    if (next === current) break;
-    current = next;
+    const next = lenientDecodeOnce(current);
+    malformed = malformed || next.malformed;
+    if (next.value === current) break;
+    current = next.value;
   }
-  return { value: current, malformed: false };
+  return { value: current, malformed };
 }
 
 /** True when any path segment is `..` (or the `..;` suffix trick) after normalising backslashes. */

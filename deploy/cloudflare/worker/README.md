@@ -16,7 +16,8 @@ client -> Worker (auth, rate limit, heuristics) -> ORIGIN_URL (tunnel hostname,
 2. CORS: exact-match allowlist from `ALLOWED_ORIGINS`; preflights get 204 (403
    for an origin outside the list); every response carries `Vary: Origin`, and
    upstream `Access-Control-*` headers are replaced by the gateway's own.
-3. Hard heuristics, before authentication: path traversal (`..`, `..;`, and
+3. Hard heuristics, before authentication (plain and single-encoded `..` are already
+   resolved by Cloudflare before the Worker runs): path traversal (`..`, `..;`, and
    percent/double-encoded forms), null bytes, methods outside
    GET/POST/PUT/PATCH/DELETE/OPTIONS/HEAD. These answer 400 and record evidence,
    within the per-IP escalation budget described under "Evidence log".

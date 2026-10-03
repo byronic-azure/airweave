@@ -323,7 +323,7 @@ manifests and the scripts. Required unless marked optional.
 | `DENYLIST`     | `[[kv_namespaces]]` with the `id` from `wrangler kv namespace create DENYLIST` | Yes: absent disables autoblock and the hot-path check. |
 | `EVIDENCE_DB`  | `[[d1_databases]]` `database_name = "airweave-edge-evidence"`, `database_id`, `migrations_dir = "migrations"` | Yes: absent logs evidence to the console instead. |
 
-### Kubernetes (namespace `airweave`; never part of a kustomization)
+### Kubernetes (namespace `airweave`; the two Secrets are never part of a kustomization)
 
 | Object                                   | Key / mount                                                     | Overlay  | Created by |
 |------------------------------------------|-----------------------------------------------------------------|----------|------------|
@@ -384,7 +384,10 @@ Links, SSH port forwards), exactly the rule `deploy/microk8s/README.md` states f
 NodePorts. Set it before the tunnel comes up.
 
 **What the Worker enforces, and what it does not.** Hard rules are a small,
-deterministic set (path traversal including encoded variants, null bytes, methods
+deterministic set (path traversal including encoded variants — note that Cloudflare
+resolves plain and single-encoded `..` segments before the Worker runs, so the rule
+covers the double-encoded, `..;`, backslash and invalid-escape-shielded forms that do
+arrive —, null bytes, methods
 outside GET/POST/PUT/PATCH/DELETE/OPTIONS/HEAD) and answer 400 before authentication.
 Soft signals (SQL/shell-looking path or query, scanner user agents, very long URLs or
 headers, CRLF, odd dot encodings) **never block**; they tag the request for evidence.
@@ -573,7 +576,8 @@ renders and the example Secrets, and `cloudflared tunnel ingress validate` on
 `overlays/config/config.yml`.
 
 CI runs the same two groups in `.github/workflows/edge-gateway.yml` ("Edge Gateway")
-on every push and pull request that touches `deploy/cloudflare/**`: Node 22 with
+on pull requests to `main` and pushes to `main` that touch `deploy/cloudflare/**`
+(feature-branch pushes rely on the local commands above): Node 22 with
 `npm ci` / `npm run typecheck` / `npm test` / `wrangler deploy --dry-run`, and
 `validate.sh -s` with pinned, checksum-verified kubectl, kubeconform and cloudflared.
 Against a real laptop, finish with

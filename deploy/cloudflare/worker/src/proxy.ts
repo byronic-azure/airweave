@@ -48,6 +48,18 @@ const STRIPPED_REQUEST_HEADERS = new Set([
   "x-airweave-suspicion",
 ]);
 
+/** Cookies set by Cloudflare Access on the origin hostname (CF_Authorization, CF_AppSession, ...). */
+const ACCESS_COOKIE = /^\s*cf_/i;
+
+/** Drops Access cookies from a client `Cookie` header; returns null when nothing is left. */
+export function stripAccessCookies(cookieHeader: string): string | null {
+  const kept = cookieHeader
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0 && !ACCESS_COOKIE.test(part));
+  return kept.length > 0 ? kept.join("; ") : null;
+}
+
 export interface ProxyOptions {
   requestId: string;
   /** Soft signals to forward as `X-Airweave-Suspicion` (never sent to the client). */
@@ -95,6 +107,13 @@ export function buildUpstreamHeaders(request: Request, env: Env, incoming: URL, 
     if (HOP_BY_HOP.has(lower) || connectionListed.has(lower)) continue;
     if (lower.startsWith("cf-access-")) continue;
     if (STRIPPED_REQUEST_HEADERS.has(lower)) continue;
+    if (lower === "cookie") {
+      // A client-supplied Access session cookie must not reach the origin hostname,
+      // where it would be evaluated alongside the Worker's service token.
+      const kept = stripAccessCookies(value);
+      if (kept !== null) headers.append(name, kept);
+      continue;
+    }
     headers.append(name, value);
   }
 
@@ -121,6 +140,10 @@ function stripResponseHeaders(upstream: Headers, requestId: string): Headers {
   for (const [name, value] of upstream) {
     const lower = name.toLowerCase();
     if (HOP_BY_HOP.has(lower) || connectionListed.has(lower)) continue;
+    // Access answers the Worker's service token with a CF_Authorization session
+    // cookie for the origin hostname; relayed to the client it would let them call
+    // the origin directly and bypass the Worker.
+    if (lower === "set-cookie" && ACCESS_COOKIE.test(value)) continue;
     headers.append(name, value);
   }
   headers.set(REQUEST_ID_HEADER, requestId);

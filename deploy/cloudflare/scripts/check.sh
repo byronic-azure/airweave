@@ -73,7 +73,7 @@ fail() { local what="$1"; shift; printf 'FAIL  %-8s %s\n' "$what" "$*"; FAILED=$
 WORK="$(mktemp -d)"
 PF_PID=""
 cleanup() {
-  [ -n "$PF_PID" ] && kill "$PF_PID" 2>/dev/null || true
+  if [ -n "$PF_PID" ]; then kill "$PF_PID" 2>/dev/null || true; fi
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -115,9 +115,13 @@ if [ -n "$GATEWAY" ]; then
   url="${GATEWAY%/}/healthz"
   # Access service token for a gateway hostname that is itself an Access
   # application (access-jwt mode); nothing is sent when the variables are unset.
+  # The token goes through a 0600 file in $WORK (removed by the EXIT trap), never
+  # on the curl command line where any local process could read it from ps.
   access=()
   if [ -n "$ACCESS_ID" ] && [ -n "$ACCESS_SECRET" ]; then
-    access=(-H "CF-Access-Client-Id: $ACCESS_ID" -H "CF-Access-Client-Secret: $ACCESS_SECRET")
+    (umask 077; printf 'CF-Access-Client-Id: %s\nCF-Access-Client-Secret: %s\n' \
+      "$ACCESS_ID" "$ACCESS_SECRET" > "$WORK/access-headers")
+    access=(-H "@$WORK/access-headers")
   fi
   code="$(curl -sS -o "$WORK/healthz.json" -w '%{http_code}' --max-time 15 \
     ${access[@]+"${access[@]}"} "$url" 2>"$WORK/curl.err" || true)"
