@@ -1,5 +1,5 @@
 // Vitest runs the test files inside workerd (the Workers runtime) through
-// @cloudflare/vitest-pool-workers, using the bindings declared in wrangler.toml.
+// @cloudflare/vitest-pool-workers, using the bindings declared in wrangler.jsonc.
 // D1 migrations are read here on the Node side and handed to the test worker as
 // a binding; test/setup.ts applies them before each test file runs.
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
@@ -11,13 +11,15 @@ export default defineConfig(async () => {
   return {
     plugins: [
       cloudflareTest({
-        wrangler: { configPath: "./wrangler.toml" },
+        wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
           bindings: { TEST_MIGRATIONS: migrations },
         },
       }),
     ],
     test: {
+      // Worker tests only; scripts/test/*.test.mjs are Node-side and run with node --test.
+      include: ["test/**/*.test.ts"],
       setupFiles: ["./test/setup.ts"],
       // The pool shares one local D1/KV store between files; keep files sequential
       // so test/helpers.ts resetStorage() cannot race another file's assertions.

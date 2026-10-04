@@ -1,0 +1,18 @@
+{
+  // Type-checks the Node-side tooling (scripts/*.mjs, JSDoc-typed JavaScript)
+  // separately from the Worker, which compiles against workers-types instead.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["scripts/**/*.mjs"]
+}

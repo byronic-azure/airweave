@@ -149,6 +149,7 @@ fi
 cat <<EOT
 
 cloudflared is connected (overlay: $OVERLAY, context: $CONTEXT, namespace: $NAMESPACE).
+(scripts/edge.sh up --zone <zone> does every step below for you, and this one.)
 
 Next steps
   1. Route the tunnel to the backend.
@@ -175,7 +176,7 @@ cat <<EOT
        cd deploy/cloudflare/worker
        npx wrangler secret put ORIGIN_SERVICE_TOKEN_ID
        npx wrangler secret put ORIGIN_SERVICE_TOKEN_SECRET
-     and set ORIGIN_URL = "https://airweave-origin.<zone>" in wrangler.toml.
+     and set "ORIGIN_URL": "https://airweave-origin.<zone>" in wrangler.jsonc.
   4. Airweave's .env MUST have AUTH_ENABLED=true (the tunnel bypasses anything that only
      protects the laptop, such as Brev Secure Links); restart docker compose afterwards.
   5. Verify the path:  $SCRIPT_DIR/check.sh -u https://api.<zone> -o https://airweave-origin.<zone>

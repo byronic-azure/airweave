@@ -18,12 +18,14 @@ Everything lives under `deploy/cloudflare/`:
 deploy/cloudflare/
 ├── README.md                this file: architecture, setup, security model
 ├── worker/                  the Worker (TypeScript, wrangler, vitest) + worker/README.md
+│   └── scripts/edge.mjs     the one-command orchestrator behind scripts/edge.sh
 ├── k8s/
 │   ├── base/                namespace, cloudflared Deployment, the two backend Services
 │   └── overlays/
 │       ├── token/           remotely-managed tunnel (default): Secret cloudflared-token
 │       └── config/          locally-managed tunnel: config.yml, Secret cloudflared-credentials
 └── scripts/
+    ├── edge.sh              ONE COMMAND: provision, deploy, connect, smoke-test (up/plan/status/down)
     ├── up.sh                kubectl apply -k <overlay>, wait for the tunnel to connect
     ├── down.sh              remove the connector (keeps Secrets and namespace unless asked)
     ├── check.sh             pod Ready, /ready, gateway /healthz, Access on origin, backend
@@ -85,7 +87,64 @@ hard heuristics (traversal, null byte, bad method: 400 before any auth) → `AUT
 Evidence rows, TypeSafe judgements and autoblock run in `ctx.waitUntil` after the
 client has its response, and only for blocked, rate-limited or soft-flagged requests.
 
-## End-to-end setup
+## One command
+
+`scripts/edge.sh up` performs every step of the manual setup below, in order, and is
+safe to re-run: each step reads what already exists and changes only what differs.
+
+```bash
+# Prerequisites: Docker Desktop with Kubernetes enabled (step 1), Airweave running
+# with AUTH_ENABLED=true (step 2), Node 22, and a zone on Cloudflare with Zero Trust on.
+export CLOUDFLARE_API_TOKEN=...                                  # permissions below
+
+deploy/cloudflare/scripts/edge.sh plan --zone example.com        # what `up` would do; changes nothing
+deploy/cloudflare/scripts/edge.sh up   --zone example.com        # do it, then smoke-test the path
+deploy/cloudflare/scripts/edge.sh status                         # re-check later; flags are remembered
+deploy/cloudflare/scripts/edge.sh down --yes                     # remove what `up` created
+```
+
+Without bash (plain Windows), run `npm --prefix deploy/cloudflare/worker ci` once, then
+`npm --prefix deploy/cloudflare/worker run edge -- up --zone example.com`.
+
+What `up` does, in order (the last column is the manual step it replaces):
+
+| Stage | What happens | Step |
+|-------|--------------|------|
+| Preflight | The kube context answers. In mode A the backend answers `/health/ready` and refuses an anonymous `/collections/count`; `up` stops if it does not (`AUTH_ENABLED=false` would publish an open API). | 1, 2 |
+| Tunnel | Remotely-managed tunnel `airweave-origin`; ingress `airweave-origin.<zone>` → the in-cluster backend Service (rules for other hostnames are kept); proxied CNAME. A DNS record that points elsewhere is never overwritten. | 3 |
+| Origin lock | Access service token, a reusable Service Auth policy that admits only it, and a self-hosted Access application on the origin hostname. Other policies on that application are reported. | 4 |
+| Gateway auth | `--auth api-key` (default): a 256-bit `GATEWAY_API_KEY`. `--auth access-jwt`: an Allow policy from `--allow-email` / `--allow-email-domain`, an Access application on `api.<zone>`, a Bypass application on `api.<zone>/healthz`, and `TEAM_DOMAIN` / `POLICY_AUD` from them. | 5 |
+| Bindings | KV namespace `airweave-edge-denylist` and D1 database `airweave-edge-evidence`, found by name or created; checks that `api.<zone>` is free for a Workers Custom Domain. | 6 |
+| Config | Writes the account values (routes, vars, binding ids) into `worker/wrangler.jsonc` with comments and layout kept, so a later plain `npm run deploy` keeps working. | 7, 9 |
+| Deploy | Remote D1 migrations, then one `wrangler deploy --secrets-file`: code and secrets go live as one version, through a 0600 file that is deleted afterwards. | 7, 8 |
+| Connector | Secret `cloudflared-token` through `kubectl apply -f -` (stdin, never argv), overlay `k8s/overlays/token`, a restart when the token changed, and a wait for the rollout. | 3 |
+| Verify | Tunnel healthy; the origin refuses a request without the token and serves one with it; the gateway answers `/healthz`, rejects anonymous calls and, in api-key mode, serves an authenticated request end to end and an intact `/evidence/verify`. | 10 |
+
+**Credentials and state.** Cloudflare shows a service token secret once, so `up` keeps
+it, the gateway key and the ids of everything it created in
+`deploy/cloudflare/.edge/state.json` (mode 0600, gitignored). If that file is lost, the
+next `up` rotates the token secret and issues a new gateway key instead of duplicating
+resources. `down` deletes only what `up` created; the KV denylist and the D1 evidence
+log survive unless you add `--delete-data`.
+
+**API token permissions** (dash.cloudflare.com → My Profile → API Tokens → Create
+custom token): Account → Cloudflare Tunnel: Edit, Access: Apps and Policies: Edit,
+Access: Service Tokens: Edit, Access: Organizations, Identity Providers, and Groups:
+Read (Edit with `--strict-service-tokens`), Workers Scripts: Edit, Workers KV Storage:
+Edit, D1: Edit, Account Settings: Read; Zone (your zone) → Zone: Read, DNS: Edit,
+Workers Routes: Edit. `wrangler` reuses the same token, so no `wrangler login` is needed.
+
+**Choices worth knowing.** `--strict-service-tokens` turns on Access strict service
+token authentication for the whole Zero Trust organization (Cloudflare's recommended
+setting; without it Access hands the Worker a `CF_Authorization` cookie, which the
+Worker drops). `--backend cluster` routes the tunnel to an in-cluster `airweave-backend`
+Service (mode B). `--skip-k8s` leaves Kubernetes alone when cloudflared runs elsewhere.
+`edge.sh help` lists every flag.
+
+## Manual setup (what `edge.sh up` automates)
+
+Use these steps to understand the moving parts, to set up one piece by hand, or when
+the API token cannot be given the permissions above.
 
 You need: Docker Desktop, Node 22 (`npx wrangler` is used throughout), a Cloudflare
 zone (a domain whose DNS is on Cloudflare) and Zero Trust enabled on the account (the
@@ -226,20 +285,20 @@ Pick one `AUTH_MODE` for the Worker:
 cd deploy/cloudflare/worker
 npm install
 npx wrangler login
-npx wrangler kv namespace create DENYLIST            # paste id into [[kv_namespaces]]
-npx wrangler d1 create airweave-edge-evidence         # paste database_id into [[d1_databases]]
+npx wrangler kv namespace create airweave-edge-denylist   # paste id into kv_namespaces[0].id
+npx wrangler d1 create airweave-edge-evidence            # paste database_id into d1_databases[0]
 npx wrangler d1 migrations apply airweave-edge-evidence --remote
 ```
 
-The rate limiter needs no resource: `[[unsafe.bindings]] RATE_LIMITER` in
-`wrangler.toml` (namespace_id `1001`, 100 requests per 60 s per principal) is created
+The rate limiter needs no resource: the `ratelimits` entry `RATE_LIMITER` in
+`wrangler.jsonc` (namespace_id `1001`, 100 requests per 60 s per principal) is created
 on deploy. KV and D1 are optional: without `DENYLIST` autoblock is impossible,
 without `EVIDENCE_DB` evidence goes to the console (`wrangler tail`). The
 `REPLACE_ME` ids work for local dev and tests only.
 
 ### 7. Configure vars and secrets
 
-Edit `[vars]` in `wrangler.toml`: `ORIGIN_URL = "https://airweave-origin.<zone>"`,
+Edit `"vars"` in `wrangler.jsonc`: `"ORIGIN_URL": "https://airweave-origin.<zone>"`,
 `ALLOWED_ORIGINS` (browser origins allowed to call the gateway, exact match),
 `AUTH_MODE`, and for access-jwt `TEAM_DOMAIN` + `POLICY_AUD`. Then the secrets, which
 never go in a file (each command prompts for the value):
@@ -260,7 +319,7 @@ npm run typecheck && npm test
 npm run deploy
 ```
 
-`wrangler.toml` sets `workers_dev = false` and `preview_urls = false`, so the
+`wrangler.jsonc` sets `"workers_dev": false` and `"preview_urls": false`, so the
 deploy publishes no `airweave-edge-gateway.<account>.workers.dev` hostname: that
 hostname would sit outside the Access application, WAF and rate-limiting rules of
 your zone, leaving the Worker's own checks as the only ones. Until step 9 attaches
@@ -268,11 +327,11 @@ a route the Worker is therefore deployed but unreachable, which is intended.
 
 ### 9. Put the Worker on `api.<zone>`
 
-Either uncomment `routes` in `wrangler.toml` before deploying:
+Either set `routes` in `wrangler.jsonc` before deploying:
 
-```toml
-routes = [{ pattern = "api.<zone>/*", zone_name = "<zone>" }]        # route: needs a proxied DNS record
-# routes = [{ pattern = "api.<zone>", custom_domain = true }]          # custom domain: DNS is created for you
+```jsonc
+"routes": [{ "pattern": "api.<zone>", "custom_domain": true }],          // custom domain: DNS is created for you
+// "routes": [{ "pattern": "api.<zone>/*", "zone_name": "<zone>" }],    // route: needs a proxied DNS record
 ```
 
 or in the dashboard: Workers & Pages → airweave-edge-gateway → Settings → Domains &
@@ -303,10 +362,10 @@ cluster reaches the backend through the Service the tunnel routes to.
 
 ## Every variable, secret and binding
 
-Names are the ones used in `worker/src/env.ts`, `worker/wrangler.toml`, the
+Names are the ones used in `worker/src/env.ts`, `worker/wrangler.jsonc`, the
 manifests and the scripts. Required unless marked optional.
 
-### Worker: plain configuration (`worker/wrangler.toml` `[vars]`; `.dev.vars` may override locally)
+### Worker: plain configuration (`worker/wrangler.jsonc` `"vars"`; `.dev.vars` may override locally)
 
 | Name                        | Purpose                                                                                       |
 |-----------------------------|-----------------------------------------------------------------------------------------------|
@@ -330,13 +389,13 @@ manifests and the scripts. Required unless marked optional.
 | `GATEWAY_API_KEY`             | api-key mode only: value compared in constant time to `X-Airweave-Gateway-Key`.        |
 | `TYPESAFE_API_KEY`            | Optional: enables TypeSafe judgements of flagged requests.                             |
 
-### Worker: bindings (`worker/wrangler.toml`)
+### Worker: bindings (`worker/wrangler.jsonc`)
 
 | Binding        | Declared as                                                              | Optional? |
 |----------------|--------------------------------------------------------------------------|-----------|
-| `RATE_LIMITER` | `[[unsafe.bindings]] type = "ratelimit"`, `namespace_id = "1001"`, `simple = { limit = 100, period = 60 }` | Yes: absent adds `X-Airweave-RateLimit: disabled` to every response. |
-| `DENYLIST`     | `[[kv_namespaces]]` with the `id` from `wrangler kv namespace create DENYLIST` | Yes: absent disables autoblock and the hot-path check. |
-| `EVIDENCE_DB`  | `[[d1_databases]]` `database_name = "airweave-edge-evidence"`, `database_id`, `migrations_dir = "migrations"` | Yes: absent logs evidence to the console instead. |
+| `RATE_LIMITER` | `ratelimits` entry, `"namespace_id": "1001"`, `"simple": { "limit": 100, "period": 60 }` | Yes: absent adds `X-Airweave-RateLimit: disabled` to every response. |
+| `DENYLIST`     | `kv_namespaces` entry with the `id` of namespace `airweave-edge-denylist` | Yes: absent disables autoblock and the hot-path check. |
+| `EVIDENCE_DB`  | `d1_databases` entry: `"database_name": "airweave-edge-evidence"`, `database_id`, `"migrations_dir": "migrations"` | Yes: absent logs evidence to the console instead. |
 
 ### Kubernetes (namespace `airweave`; the two Secrets are never part of a kustomization)
 
@@ -350,7 +409,11 @@ manifests and the scripts. Required unless marked optional.
 
 | Variable             | Flag | Script(s)                   | Purpose                                              |
 |----------------------|------|-----------------------------|------------------------------------------------------|
-| `KUBE_CONTEXT`       | `-c` | up.sh, down.sh, check.sh    | kube context, default `docker-desktop`               |
+| `CLOUDFLARE_API_TOKEN` | – | edge.sh                     | required by `edge.sh`; also handed to wrangler       |
+| `EDGE_ZONE`          | `--zone` | edge.sh                 | the Cloudflare zone; remembered in the state file    |
+| `CLOUDFLARE_ACCOUNT_ID` | `--account` | edge.sh          | needed only when the token sees several accounts     |
+| `TYPESAFE_API_KEY`   | – | edge.sh                        | optional; uploaded as the Worker secret of that name |
+| `KUBE_CONTEXT`       | `-c` | up.sh, down.sh, check.sh (`--context` for edge.sh) | kube context, default `docker-desktop` |
 | `GATEWAY_URL`        | `-u` | check.sh                    | `https://api.<zone>`; `/healthz` must be 200 `ok:true` |
 | `ORIGIN_URL`         | `-o` | check.sh                    | `https://airweave-origin.<zone>`; Access must refuse (same value as the Worker var) |
 | `ORIGIN_SERVICE_TOKEN_ID`, `ORIGIN_SERVICE_TOKEN_SECRET` | – | check.sh | origin cookie check: the Worker's own token is sent to the tunnel hostname and the answer must carry no `Set-Cookie: CF_Authorization` (requires strict service token authentication, step 4) |
@@ -581,7 +644,7 @@ and an evidence row with verdict `rate_limited`. In api-key mode there is exactl
 `GATEWAY_API_KEY`, so every client shares one bucket (`apikey:<sha256>`); to separate
 clients switch to access-jwt, where each user gets a `jwt:<sub>` bucket and each
 machine client gets its own Access service token (`jwt:<common-name>`). To change the limit edit `simple.limit` /
-`simple.period` in `wrangler.toml` (period must be 10 or 60), keep
+`simple.period` in `wrangler.jsonc` (period must be 10 or 60), keep
 `RATE_LIMIT_PERIOD_SECONDS` equal to the period, and redeploy. Removing the binding
 disables limiting (every response then says `X-Airweave-RateLimit: disabled`).
 
@@ -593,7 +656,8 @@ that for you).
 ## Run the checks
 
 ```bash
-# Worker: types and the vitest suite (runs inside workerd; no network needed)
+# Worker and orchestrator: types (Worker + checkJs over scripts/*.mjs), the vitest
+# suite inside workerd, then node --test for edge.mjs against an in-memory Cloudflare API
 cd deploy/cloudflare/worker
 npm ci
 npm run typecheck
@@ -621,6 +685,10 @@ Against a real laptop, finish with
 
 ## Tear down
 
+`deploy/cloudflare/scripts/edge.sh down` prints what it would remove; `down --yes`
+removes everything `up` created (connector, Worker and its Custom Domain, Access
+applications, policies and service token, DNS record, tunnel) and keeps the KV
+denylist and D1 evidence log unless `--delete-data` is added. By hand:
 `deploy/cloudflare/scripts/down.sh` removes the Deployment, the two Services and the
 generated ConfigMaps and keeps the Secrets and the namespace (a mode B backend may
 live there); `-s` also deletes the Secrets, `-N` deletes the whole namespace. Delete

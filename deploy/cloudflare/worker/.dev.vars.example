@@ -1,6 +1,6 @@
 # Local secrets for `wrangler dev` (copy to .dev.vars, which is git-ignored).
 # Production values are set with `npx wrangler secret put <NAME>` and never
-# committed. Plain configuration lives in wrangler.toml [vars].
+# committed. Plain configuration lives in wrangler.jsonc "vars".
 
 # Access service token that the tunnel's Access application accepts.
 ORIGIN_SERVICE_TOKEN_ID=REPLACE_ME.access

@@ -4,7 +4,7 @@
  * Everything is optional at the type level so that a missing binding or variable
  * degrades to a documented behaviour instead of a crash: see the per-field notes
  * and deploy/cloudflare/worker/README.md. Secrets are set with
- * `wrangler secret put <NAME>` (or `.dev.vars` locally) and never live in wrangler.toml.
+ * `wrangler secret put <NAME>` (or `.dev.vars` locally) and never live in wrangler.jsonc.
  */
 
 /** Minimal surface of the Workers rate limiting binding (`[[unsafe.bindings]] type = "ratelimit"`). */

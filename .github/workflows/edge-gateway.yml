@@ -54,11 +54,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test (vitest inside workerd)
+      - name: Test (vitest inside workerd, node --test for scripts/edge.mjs)
         run: npm test
 
       # Bundles with the real wrangler/workerd pipeline without an account; this
-      # catches entry-module and wrangler.toml problems the test pool cannot see.
+      # catches entry-module and wrangler.jsonc problems the test pool cannot see.
       - name: Bundle check (wrangler deploy --dry-run)
         env:
           WRANGLER_SEND_METRICS: "false"

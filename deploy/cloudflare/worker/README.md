@@ -80,8 +80,11 @@ whose token the health check sends (`check.sh` forwards `CF_ACCESS_CLIENT_ID` /
 
 ## Configuration
 
-Plain values live in `wrangler.toml` `[vars]`; secrets are set with
+Plain values live in `wrangler.jsonc` `"vars"`; secrets are set with
 `wrangler secret put` (locally: `.dev.vars`, see `.dev.vars.example`).
+`../scripts/edge.sh up --zone <zone>` provisions every binding and secret below,
+writes the account values into `wrangler.jsonc` and deploys; see
+`deploy/cloudflare/README.md`, "One command".
 
 | Name                          | Kind    | Purpose                                                                 |
 |-------------------------------|---------|-------------------------------------------------------------------------|
@@ -98,12 +101,12 @@ Plain values live in `wrangler.toml` `[vars]`; secrets are set with
 | `ORIGIN_SERVICE_TOKEN_SECRET` | secret  | Its secret.                                                             |
 | `GATEWAY_API_KEY`             | secret  | Shared key for `AUTH_MODE=api-key`.                                     |
 | `TYPESAFE_API_KEY`            | secret  | Enables TypeSafe judgements when set.                                   |
-| `RATE_LIMITER`                | binding | `[[unsafe.bindings]] type = "ratelimit"`; optional.                     |
-| `DENYLIST`                    | binding | KV namespace for autoblock; optional. `wrangler kv namespace create DENYLIST`. |
+| `RATE_LIMITER`                | binding | `ratelimits` entry (Workers Rate Limiting); optional.                   |
+| `DENYLIST`                    | binding | KV namespace for autoblock; optional. `wrangler kv namespace create airweave-edge-denylist`. |
 | `EVIDENCE_DB`                 | binding | D1 database for the evidence log; optional. `wrangler d1 create airweave-edge-evidence`, then `wrangler d1 migrations apply airweave-edge-evidence --remote`. |
 
-The placeholder ids in `wrangler.toml` (`REPLACE_ME`) work for local dev and
-tests; replace them before `npm run deploy`.
+The placeholder ids in `wrangler.jsonc` (`REPLACE_ME`) work for local dev and
+tests; `edge.sh up` replaces them, or paste real ids before `npm run deploy`.
 
 ## Evidence log
 
@@ -170,6 +173,9 @@ browser cannot be made to send `CF-Access-Client-Id`/`-Secret` cross-site.
 
 `npm install`, `npm run dev` (applies the local D1 migrations first, then serves
 http://localhost:8787/healthz), `npm test`, `npm run typecheck`, `npm run deploy`.
+`npm test` also runs `node --test` over `scripts/test/`, which drives the
+`edge.mjs` orchestrator against an in-memory Cloudflare API; `npm run typecheck`
+checks `scripts/*.mjs` (JSDoc types) under `strict` as well as the Worker.
 Tests run inside workerd through `@cloudflare/vitest-pool-workers` with a local D1
 (migrations applied from `migrations/`) and KV; outbound `fetch` is stubbed, so no
 network is needed.
