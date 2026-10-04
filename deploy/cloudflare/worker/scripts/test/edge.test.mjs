@@ -3,7 +3,7 @@
 // Run with: npm run test:scripts  (node --test)
 
 import assert from "node:assert/strict";
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -307,6 +307,16 @@ describe("edge.mjs without kubectl", () => {
     });
     assert.equal(await edge(["down", "--yes", "--skip-k8s"]), 0, out);
     assert.equal(cf.tunnels.length, 0);
+  });
+});
+
+describe("edge.mjs state file", () => {
+  it("refuses a state file that group or others can write", { skip: process.platform === "win32" }, async () => {
+    await edge(["up", "--zone", "example.com"]);
+    chmodSync(stateFile(), 0o666);
+    await assert.rejects(edge(["status"]), /writable by group or others \(mode 666\); run chmod 600/);
+    chmodSync(stateFile(), 0o600);
+    assert.equal(await edge(["status"]), 0, out);
   });
 });
 

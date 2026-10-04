@@ -4,7 +4,7 @@
 // shows exactly once (the origin service token secret and the gateway API key).
 // Written atomically with mode 0600 inside a 0700 directory; gitignored.
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { EdgeError } from "./util.mjs";
 
@@ -37,6 +37,7 @@ export function emptyState() {
  */
 export function loadState(file) {
   if (!existsSync(file)) return emptyState();
+  assertPrivate(file);
   /** @type {any} */
   let data;
   try {
@@ -46,6 +47,28 @@ export function loadState(file) {
   }
   if (data?.version !== 1) throw new EdgeError(`${file}: unsupported state version ${data?.version}`);
   return { ...emptyState(), ...data, ids: { ...data.ids }, created: { ...data.created } };
+}
+
+/**
+ * The state file decides where stored credentials are sent (the smoke test
+ * authenticates to the hostnames it records). Like ssh with a private key,
+ * refuse a file that another user owns or that group/others can write, since
+ * whoever can edit it could point those credentials at a host of their choice.
+ * POSIX only; Windows has no comparable mode bits.
+ * @param {string} file
+ */
+export function assertPrivate(file) {
+  if (process.platform === "win32" || typeof process.getuid !== "function") return;
+  const st = statSync(file);
+  if (st.uid !== process.getuid()) {
+    throw new EdgeError(`${file} is owned by uid ${st.uid}, not you; refusing to use the credentials in it`);
+  }
+  if ((st.mode & 0o022) !== 0) {
+    throw new EdgeError(
+      `${file} is writable by group or others (mode ${(st.mode & 0o777).toString(8)}); run chmod 600 on it. ` +
+        "On a filesystem without POSIX permissions (e.g. /mnt/c under WSL) pass --state <path in your home directory>.",
+    );
+  }
 }
 
 /**

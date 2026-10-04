@@ -124,8 +124,11 @@ What `up` does, in order (the last column is the manual step it replaces):
 it, the gateway key and the ids of everything it created in
 `deploy/cloudflare/.edge/state.json` (mode 0600, gitignored). If that file is lost, the
 next `up` rotates the token secret and issues a new gateway key instead of duplicating
-resources. `down` deletes only what `up` created; the KV denylist and the D1 evidence
-log survive unless you add `--delete-data`.
+resources. Like ssh with a private key, every command refuses a state file that another
+user owns or that group or others can write, because the hostnames in it decide where the
+stored credentials are sent (on `/mnt/c` under WSL, pass `--state ~/airweave-edge.json`).
+`down` deletes only what `up` created; the KV denylist and the D1 evidence log survive
+unless you add `--delete-data`.
 
 **API token permissions** (dash.cloudflare.com → My Profile → API Tokens → Create
 custom token): Account → Cloudflare Tunnel: Edit, Access: Apps and Policies: Edit,
