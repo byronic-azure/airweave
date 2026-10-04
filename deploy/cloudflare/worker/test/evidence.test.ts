@@ -208,6 +208,24 @@ describe("GET /evidence/verify", () => {
     expect(stub.callsTo(ORIGIN)).toHaveLength(0);
   });
 
+  it("records a soft-flagged probe aimed at the endpoint itself", async () => {
+    const env = makeEnv({ EVIDENCE_DB: db() });
+    const res = await run(
+      gatewayRequest("/evidence/verify?q=1%27%20or%201%3D1--", { headers: { "User-Agent": "sqlmap/1.7" } }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, count: 0 }); // verified before the row was appended
+    const rows = await allRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      verdict: "flagged",
+      reason: "soft:sqli_signature,scanner_user_agent",
+      path: "/evidence/verify?q=1%27%20or%201%3D1--",
+    });
+    expect(stub.callsTo(ORIGIN)).toHaveLength(0);
+  });
+
   it("answers 503 when no database is bound", async () => {
     const res = await run(gatewayRequest("/evidence/verify"), makeEnv());
     expect(res.status).toBe(503);

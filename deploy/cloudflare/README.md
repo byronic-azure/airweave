@@ -260,6 +260,12 @@ npm run typecheck && npm test
 npm run deploy
 ```
 
+`wrangler.toml` sets `workers_dev = false` and `preview_urls = false`, so the
+deploy publishes no `airweave-edge-gateway.<account>.workers.dev` hostname: that
+hostname would sit outside the Access application, WAF and rate-limiting rules of
+your zone, leaving the Worker's own checks as the only ones. Until step 9 attaches
+a route the Worker is therefore deployed but unreachable, which is intended.
+
 ### 9. Put the Worker on `api.<zone>`
 
 Either uncomment `routes` in `wrangler.toml` before deploying:
@@ -571,9 +577,10 @@ and is passed through unchanged.
 **429s.** The limit is 100 requests per 60 s *per principal* (`simple = { limit,
 period }` on the `RATE_LIMITER` binding), counted per Cloudflare location and
 approximate. The response carries `Retry-After` and `X-Airweave-RateLimit: exceeded`,
-and an evidence row with verdict `rate_limited`. In api-key mode every client sharing
-one key shares one bucket (`apikey:<sha256>`); give clients their own keys or use
-access-jwt so the bucket is per user. To change the limit edit `simple.limit` /
+and an evidence row with verdict `rate_limited`. In api-key mode there is exactly one
+`GATEWAY_API_KEY`, so every client shares one bucket (`apikey:<sha256>`); to separate
+clients switch to access-jwt, where each user gets a `jwt:<sub>` bucket and each
+machine client gets its own Access service token (`jwt:<common-name>`). To change the limit edit `simple.limit` /
 `simple.period` in `wrangler.toml` (period must be 10 or 60), keep
 `RATE_LIMIT_PERIOD_SECONDS` equal to the period, and redeploy. Removing the binding
 disables limiting (every response then says `X-Airweave-RateLimit: disabled`).

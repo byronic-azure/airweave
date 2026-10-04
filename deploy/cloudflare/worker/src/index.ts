@@ -201,28 +201,34 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext, rc: Req
     return rateLimitedResponse(env, requestId);
   }
 
-  if (url.pathname === "/evidence/verify" && (method === "GET" || method === "HEAD")) {
-    if (!env.EVIDENCE_DB) {
-      return jsonError(503, "evidence_db_not_configured", "EVIDENCE_DB binding is not set", requestId);
-    }
-    try {
-      return jsonResponse(await verifyChain(env.EVIDENCE_DB));
-    } catch (err) {
-      if (!/no such table/i.test(String(err))) throw err;
-      return jsonError(
-        503,
-        "evidence_db_not_migrated",
-        "Run `wrangler d1 migrations apply airweave-edge-evidence` (add --local for wrangler dev)",
-        requestId,
-      );
-    }
-  }
-
-  const response = await proxyToOrigin(request, env, { requestId, suspicion: inspection.soft });
+  // The gateway's own endpoint is screened like any proxied path: a soft-flagged
+  // probe aimed at /evidence/verify is recorded the same way, without reaching the origin.
+  const response =
+    url.pathname === "/evidence/verify" && (method === "GET" || method === "HEAD")
+      ? await verifyEvidence(env, requestId)
+      : await proxyToOrigin(request, env, { requestId, suspicion: inspection.soft });
   if (inspection.soft.length > 0) {
     ctx.waitUntil(escalate(request, env, rc, softEscalation(principal, inspection.soft, response.status)));
   }
   return response;
+}
+
+/** Answers GET /evidence/verify: the chain state, or a 503 naming the missing setup step. */
+async function verifyEvidence(env: Env, requestId: string): Promise<Response> {
+  if (!env.EVIDENCE_DB) {
+    return jsonError(503, "evidence_db_not_configured", "EVIDENCE_DB binding is not set", requestId);
+  }
+  try {
+    return jsonResponse(await verifyChain(env.EVIDENCE_DB));
+  } catch (err) {
+    if (!/no such table/i.test(String(err))) throw err;
+    return jsonError(
+      503,
+      "evidence_db_not_migrated",
+      "Run `wrangler d1 migrations apply airweave-edge-evidence` (add --local for wrangler dev)",
+      requestId,
+    );
+  }
 }
 
 // workerd only accepts handlers or entrypoint classes as named exports of the
