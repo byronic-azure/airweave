@@ -1,0 +1,39 @@
+{
+  "name": "airweave-edge-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Worker edge gateway in front of a Cloudflare Tunnel to a local Airweave backend",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "predev": "node scripts/predev.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "edge": "node scripts/edge.mjs",
+    "test": "vitest run && npm run -s test:scripts",
+    "test:watch": "vitest",
+    "test:scripts": "node --test \"scripts/test/*.test.mjs\"",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
+    "migrate:local": "wrangler d1 migrations apply airweave-edge-evidence --local",
+    "migrate:remote": "wrangler d1 migrations apply airweave-edge-evidence --remote"
+  },
+  "dependencies": {
+    "jose": "^6.2.12"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^4.20260702.1",
+    "@types/node": "22.20.5",
+    "jsonc-parser": "3.3.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11",
+    "wrangler": "4.147.0"
+  },
+  "overrides": {
+    "miniflare": "5.20261001.0-alpha",
+    "wrangler": "$wrangler"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

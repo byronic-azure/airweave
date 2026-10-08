@@ -1,0 +1,30 @@
+# Mode A: a stable in-cluster DNS name for the Airweave backend that runs under
+# docker compose on the laptop (docker/docker-compose.yml publishes 8001:8001).
+#
+# Docker Desktop resolves host.docker.internal to the host from inside pods, so
+# this ExternalName Service makes
+#   airweave-backend-host.airweave.svc.cluster.local
+# a CNAME for host.docker.internal. Point the tunnel route at
+#   http://airweave-backend-host.airweave.svc.cluster.local:8001
+# (dashboard, overlays/token) or keep the matching ingress rule in
+# overlays/config/config.yml. Routing straight to http://host.docker.internal:8001
+# works as well; the Service only spares you a Docker-specific name in Cloudflare.
+#
+# ExternalName Services have no selector and no endpoints; the port is
+# informational.
+apiVersion: v1
+kind: Service
+metadata:
+  name: airweave-backend-host
+  namespace: airweave
+  labels:
+    app.kubernetes.io/name: airweave-backend-host
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: airweave
+spec:
+  type: ExternalName
+  externalName: host.docker.internal
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8001

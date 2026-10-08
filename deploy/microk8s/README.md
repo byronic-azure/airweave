@@ -96,3 +96,14 @@ microk8s kubectl get svc -n airweave \
 ```
 
 Use plain `kubectl` instead of `microk8s kubectl` if it is on your `PATH`.
+
+## Cloudflare Tunnel alternative
+
+If the node has no public ingress, or you would rather not open NodePorts at all,
+`deploy/cloudflare/README.md` describes the other way in: a `cloudflared` Deployment
+in the cluster (Docker Desktop Kubernetes by default, same `airweave` namespace and
+labels) that dials out to a Cloudflare Tunnel, an Access policy that admits only the
+edge Worker's service token, and the `airweave-edge-gateway` Worker that
+authenticates, rate-limits and screens requests before proxying them to the backend.
+Nothing listens on the node, but the same rule applies: run the backend with
+`AUTH_ENABLED=true`.

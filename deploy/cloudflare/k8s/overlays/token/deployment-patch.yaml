@@ -1,0 +1,18 @@
+# Strategic-merge patch: hand cloudflared the tunnel token through the
+# environment (never on the command line, where `ps` would show it).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: airweave
+spec:
+  template:
+    spec:
+      containers:
+        - name: cloudflared
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflared-token
+                  key: TUNNEL_TOKEN

@@ -1,0 +1,9 @@
+# Shared namespace for everything Airweave puts into the cluster, named like
+# the one deploy/microk8s uses. In mode B the backend Deployment lives here too,
+# so down.sh leaves the namespace alone unless told otherwise.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: airweave
+  labels:
+    app.kubernetes.io/part-of: airweave

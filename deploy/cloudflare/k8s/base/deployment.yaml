@@ -1,0 +1,134 @@
+# cloudflared connector for the Airweave edge gateway.
+#
+# Runs inside Docker Desktop's built-in Kubernetes (Settings > Kubernetes >
+# "Enable Kubernetes"; kube context "docker-desktop"). One replica is enough on
+# a laptop: a single cloudflared already opens four connections to the edge.
+#
+# Where the backend lives is decided by the tunnel ROUTE, not by this file:
+#   mode A (default)  docker compose on the host. docker/docker-compose.yml
+#                     publishes 8001:8001, and pods reach the host as
+#                     http://host.docker.internal:8001. The ExternalName Service
+#                     airweave-backend-host gives that a stable in-cluster name.
+#   mode B            backend deployed into this cluster behind the ClusterIP
+#                     Service airweave-backend (selector app: airweave-backend).
+#
+# The overlays add the tunnel identity:
+#   overlays/token    env TUNNEL_TOKEN from Secret "cloudflared-token"; routes
+#                     are configured in the Cloudflare dashboard
+#   overlays/config   --config /etc/cloudflared/config/config.yml from a ConfigMap
+#                     plus credentials.json from Secret "cloudflared-credentials"
+#
+# Security: the tunnel bypasses every control that only exists in front of the
+# laptop (Brev Secure Links, port forwards), so Airweave's .env MUST set
+# AUTH_ENABLED=true before the tunnel comes up. The Cloudflare Access policy on
+# the tunnel hostname (service token only) keeps the origin reachable solely
+# through the Worker.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: airweave
+  labels:
+    app: cloudflared
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/component: tunnel
+    app.kubernetes.io/part-of: airweave
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+        app.kubernetes.io/name: cloudflared
+        app.kubernetes.io/component: tunnel
+        app.kubernetes.io/part-of: airweave
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # The image runs as distroless "nonroot" (uid/gid 65532). Pinning the
+        # numeric ids lets the kubelet enforce runAsNonRoot without having to
+        # inspect the image, and fsGroup makes mounted Secrets readable.
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cloudflared
+          # 2026.9.3 is the 2026-09-24 release, confirmed on Docker Hub as a
+          # multi-arch tag (-amd64 / -arm64 variants exist too). Bump it on
+          # purpose; --no-autoupdate below stops the binary upgrading itself.
+          image: cloudflare/cloudflared:2026.9.3
+          imagePullPolicy: IfNotPresent
+          # --metrics 0.0.0.0:2000 exposes /ready and /metrics inside the pod
+          # for the probes below. overlays/config inserts
+          # "--config /etc/cloudflared/config/config.yml" before "run".
+          command:
+            - cloudflared
+            - tunnel
+            - --no-autoupdate
+            - --loglevel
+            - info
+            - --metrics
+            - 0.0.0.0:2000
+            - run
+          # If UDP 7844 (QUIC) is blocked on your network, uncomment this env
+          # var. It reaches BOTH overlays (env is merged), unlike a
+          # "--protocol http2" pair before "run", which the config overlay's
+          # deployment-patch.yaml would have to repeat because it replaces
+          # `command` wholesale. scripts/check_manifests.py accepts either form.
+          # env:
+          #   - name: TUNNEL_TRANSPORT_PROTOCOL
+          #     value: http2
+          ports:
+            - name: metrics
+              containerPort: 2000
+              protocol: TCP
+          # /ready answers 200 only while cloudflared holds at least one live
+          # connection to the edge, so a pod whose tunnel died (laptop sleep,
+          # revoked token) is restarted instead of lingering.
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Readiness is what up.sh waits on: the rollout only completes once
+          # the tunnel is actually connected.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            # cloudflared does not need to write anything in either mode; the
+            # scratch mount only keeps a read-only root filesystem from
+            # surprising a future release that wants temp space.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
